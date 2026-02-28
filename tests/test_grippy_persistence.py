@@ -163,6 +163,15 @@ class TestRecordId:
         nid = _record_id("CUSTOM", "some_value")
         assert nid.startswith("CUSTOM:")
 
+    def test_different_types_same_parts_different_digest(self) -> None:
+        """Different node types with the same parts produce different hash digests."""
+        file_id = _record_id(NodeType.FILE, "src/app.py")
+        rule_id = _record_id(NodeType.RULE, "src/app.py")
+        # Prefixes differ obviously, but the digests must also differ
+        file_digest = file_id.split(":")[1]
+        rule_digest = rule_id.split(":")[1]
+        assert file_digest != rule_digest
+
 
 # --- Construction ---
 
@@ -217,6 +226,67 @@ class TestGrippyStoreInit:
         cur.execute("PRAGMA journal_mode")
         mode = cur.fetchone()[0]
         assert mode == "wal"
+
+    def test_migrates_v1_schema(self, tmp_path: Path) -> None:
+        """Opening a DB with v1 schema (source_id, edge_type, target_id) drops and recreates."""
+        db_path = tmp_path / "grippy-graph.db"
+        import sqlite3
+
+        # Create a v1-shaped database
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY, type TEXT, label TEXT, data TEXT)")
+        conn.execute(
+            "CREATE TABLE edges (source_id TEXT, edge_type TEXT, target_id TEXT, metadata TEXT)"
+        )
+        conn.execute("CREATE TABLE node_meta (node_id TEXT PRIMARY KEY, meta TEXT)")
+        conn.commit()
+        conn.close()
+
+        # Open with GrippyStore — should migrate
+        store = GrippyStore(
+            graph_db_path=db_path,
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+
+        # Verify v2 schema is in place
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA table_info(edges)")
+        columns = {row["name"] for row in cur.fetchall()}
+        assert "source" in columns
+        assert "source_id" not in columns
+
+        # Verify node_meta is gone
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='node_meta'")
+        assert cur.fetchone() is None
+
+    def test_v2_schema_not_dropped(self, tmp_path: Path) -> None:
+        """Opening a DB that already has v2 schema preserves existing data."""
+        db_path = tmp_path / "grippy-graph.db"
+
+        # Create store, insert data, close
+        store1 = GrippyStore(
+            graph_db_path=db_path,
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+        review = _make_review()
+        store1.store_review(review, session_id="pr-1")
+        cur = store1._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        count_before = cur.fetchone()[0]
+        store1._conn.close()
+
+        # Re-open — should NOT drop tables
+        store2 = GrippyStore(
+            graph_db_path=db_path,
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+        cur = store2._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        count_after = cur.fetchone()[0]
+        assert count_after == count_before
 
 
 # --- store_review ---

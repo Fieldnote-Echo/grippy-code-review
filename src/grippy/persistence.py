@@ -53,10 +53,12 @@ def _arrow_table_to_dicts(table: Any) -> list[dict[str, Any]]:
 def _record_id(node_type: NodeType | str, *parts: str) -> str:
     """Deterministic node ID: '{TYPE}:{sha256[:12]}'.
 
-    Format preserved from the original ``node_id()`` for ID stability.
+    Format preserved from the original ``node_id()`` — the node type is
+    included in the hash input so different types with the same parts
+    produce different digests.
     """
     type_str = node_type.value if isinstance(node_type, NodeType) else node_type
-    raw = ":".join(parts)
+    raw = ":".join([type_str, *parts])
     digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
     return f"{type_str.upper()}:{digest}"
 
@@ -134,11 +136,32 @@ class GrippyStore:
         cur = self._conn.cursor()
         for pragma in _PRAGMAS:
             cur.execute(pragma)
+        self._migrate_v1_schema(cur)
         cur.execute(_NODES_TABLE_SQL)
         cur.execute(_EDGES_TABLE_SQL)
         for idx_sql in _INDEXES_SQL:
             cur.execute(idx_sql)
         self._conn.commit()
+
+    @staticmethod
+    def _migrate_v1_schema(cur: sqlite3.Cursor) -> None:
+        """Drop incompatible v1 tables if present.
+
+        The v1 schema had edges(source_id, edge_type, target_id, metadata)
+        and a node_meta table.  ``CREATE TABLE IF NOT EXISTS`` would silently
+        keep the old columns, causing INSERT failures at runtime.  Since
+        graph data is ephemeral per-PR (reconstructed each review round),
+        dropping and recreating is safe.
+        """
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='edges'")
+        if cur.fetchone() is not None:
+            cur.execute("PRAGMA table_info(edges)")
+            columns = {row[1] for row in cur.fetchall()}
+            if "source_id" in columns:
+                # v1 schema — drop everything and start fresh
+                cur.execute("DROP TABLE IF EXISTS edges")
+                cur.execute("DROP TABLE IF EXISTS node_meta")
+                cur.execute("DROP TABLE IF EXISTS nodes")
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
         """Open existing nodes table if present."""
