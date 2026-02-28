@@ -1,15 +1,15 @@
-"""Tests for Grippy persistence layer — SQLite graph edges + LanceDB vectors."""
+"""Tests for Grippy persistence layer — SQLite graph + LanceDB vectors."""
 
 from __future__ import annotations
 
-import sqlite3
+import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from grippy.graph import EdgeType, NodeType, review_to_graph
-from grippy.persistence import GrippyStore
+from grippy.graph import EdgeType, FindingStatus, NodeType
+from grippy.persistence import GrippyStore, _record_id
 from grippy.schema import (
     AsciiArtKey,
     ComplexityTier,
@@ -50,6 +50,7 @@ def _make_finding(
     line_start: int = 42,
     title: str = "SQL injection in query builder",
     governance_rule_id: str | None = "SEC-001",
+    evidence: str = "f-string in execute()",
 ) -> Finding:
     return Finding(
         id=id,
@@ -63,7 +64,7 @@ def _make_finding(
         description="User input passed directly to SQL",
         suggestion="Use parameterized queries",
         governance_rule_id=governance_rule_id,
-        evidence="f-string in execute()",
+        evidence=evidence,
         grippy_note="This one hurt to read.",
     )
 
@@ -136,12 +137,39 @@ def store(tmp_path: Path) -> GrippyStore:
     )
 
 
+# --- _record_id ---
+
+
+class TestRecordId:
+    def test_deterministic(self) -> None:
+        """Same inputs produce the same ID."""
+        id1 = _record_id(NodeType.FINDING, "abc123def456")
+        id2 = _record_id(NodeType.FINDING, "abc123def456")
+        assert id1 == id2
+
+    def test_includes_type_prefix(self) -> None:
+        """IDs are prefixed with node type."""
+        nid = _record_id(NodeType.FILE, "src/app.py")
+        assert nid.startswith("FILE:")
+
+    def test_different_inputs_different_ids(self) -> None:
+        """Different inputs produce different IDs."""
+        id1 = _record_id(NodeType.FINDING, "fingerprint_a")
+        id2 = _record_id(NodeType.FINDING, "fingerprint_b")
+        assert id1 != id2
+
+    def test_accepts_string_type(self) -> None:
+        """Accepts string node type (not just enum)."""
+        nid = _record_id("CUSTOM", "some_value")
+        assert nid.startswith("CUSTOM:")
+
+
 # --- Construction ---
 
 
 class TestGrippyStoreInit:
     def test_creates_sqlite_file(self, tmp_path: Path) -> None:
-        """SQLite graph database file is created on init."""
+        """SQLite database file is created on init."""
         db_path = tmp_path / "grippy-graph.db"
         GrippyStore(
             graph_db_path=db_path,
@@ -160,85 +188,191 @@ class TestGrippyStoreInit:
         )
         assert lance_dir.exists()
 
+    def test_sqlite_schema_has_nodes_table(self, store: GrippyStore) -> None:
+        """SQLite has nodes table with expected columns."""
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA table_info(nodes)")
+        columns = {row["name"] for row in cur.fetchall()}
+        assert {
+            "id",
+            "type",
+            "label",
+            "data",
+            "session_id",
+            "status",
+            "fingerprint",
+            "created_at",
+        } <= columns
+
+    def test_sqlite_schema_has_edges_table(self, store: GrippyStore) -> None:
+        """SQLite has edges table with expected columns."""
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA table_info(edges)")
+        columns = {row["name"] for row in cur.fetchall()}
+        assert {"source", "target", "relationship", "weight", "properties", "created_at"} <= columns
+
+    def test_wal_mode_enabled(self, store: GrippyStore) -> None:
+        """WAL journal mode is active."""
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA journal_mode")
+        mode = cur.fetchone()[0]
+        assert mode == "wal"
+
 
 # --- store_review ---
 
 
 class TestStoreReview:
-    def test_stores_edges_in_sqlite(self, store: GrippyStore) -> None:
-        """Review graph edges are persisted to SQLite."""
+    def test_stores_nodes_in_sqlite(self, store: GrippyStore) -> None:
+        """Review nodes are persisted to SQLite."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        edges = store.get_all_edges()
-        assert len(edges) > 0
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        count = cur.fetchone()[0]
+        assert count > 0
 
-    def test_stores_nodes_in_lance(self, store: GrippyStore) -> None:
-        """Review graph nodes are persisted to LanceDB."""
+    def test_stores_edges_in_sqlite(self, store: GrippyStore) -> None:
+        """Review edges are persisted to SQLite."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM edges")
+        count = cur.fetchone()[0]
+        assert count > 0
+
+    def test_stores_vectors_in_lance(self, store: GrippyStore) -> None:
+        """Review nodes are persisted to LanceDB with vectors."""
+        review = _make_review()
+        store.store_review(review)
         nodes = store.get_all_nodes()
         assert len(nodes) > 0
 
-    def test_edge_schema_complete(self, store: GrippyStore) -> None:
-        """Each stored edge has source_id, edge_type, target_id, metadata."""
-        review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        edges = store.get_all_edges()
-        for edge in edges:
-            assert "source_id" in edge
-            assert "edge_type" in edge
-            assert "target_id" in edge
-            assert "metadata" in edge
+    def test_creates_expected_node_types(self, store: GrippyStore) -> None:
+        """Store creates REVIEW, AUTHOR, FILE, FINDING, SUGGESTION, RULE nodes."""
+        review = _make_review(findings=[_make_finding(governance_rule_id="SEC-001")])
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT DISTINCT type FROM nodes")
+        types = {row["type"] for row in cur.fetchall()}
+        assert {
+            NodeType.REVIEW.value,
+            NodeType.AUTHOR.value,
+            NodeType.FILE.value,
+            NodeType.FINDING.value,
+            NodeType.SUGGESTION.value,
+            NodeType.RULE.value,
+        } <= types
 
-    def test_idempotent_store(self, store: GrippyStore) -> None:
-        """Storing the same review twice doesn't create duplicate edges."""
+    def test_creates_expected_edge_types(self, store: GrippyStore) -> None:
+        """Store creates EXTRACTED_FROM, REVIEWED_BY, FOUND_IN, FIXED_BY, VIOLATES edges."""
+        review = _make_review(findings=[_make_finding(governance_rule_id="SEC-001")])
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT DISTINCT relationship FROM edges")
+        rels = {row["relationship"] for row in cur.fetchall()}
+        assert {
+            EdgeType.EXTRACTED_FROM.value,
+            EdgeType.REVIEWED_BY.value,
+            EdgeType.FOUND_IN.value,
+            EdgeType.FIXED_BY.value,
+            EdgeType.VIOLATES.value,
+        } <= rels
+
+    def test_finding_node_has_status_column(self, store: GrippyStore) -> None:
+        """Finding nodes have status as a real column."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        count_1 = len(store.get_all_edges())
-        store.store_review(graph)
-        count_2 = len(store.get_all_edges())
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT status FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        row = cur.fetchone()
+        assert row["status"] == "open"
+
+    def test_finding_node_has_fingerprint_column(self, store: GrippyStore) -> None:
+        """Finding nodes have fingerprint as a real column."""
+        review = _make_review()
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT fingerprint FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        row = cur.fetchone()
+        assert row["fingerprint"] is not None
+        assert len(row["fingerprint"]) == 12
+
+    def test_finding_id_uses_fingerprint(self, store: GrippyStore) -> None:
+        """Finding node ID is derived from fingerprint for cross-round stability."""
+        finding = _make_finding()
+        expected_id = _record_id(NodeType.FINDING, finding.fingerprint)
+        review = _make_review(findings=[finding])
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        row = cur.fetchone()
+        assert row["id"] == expected_id
+
+
+# --- Idempotency (UPSERT) ---
+
+
+class TestIdempotency:
+    def test_duplicate_store_no_duplicate_nodes(self, store: GrippyStore) -> None:
+        """Storing the same review twice doesn't create duplicate nodes."""
+        review = _make_review()
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        count_1 = cur.fetchone()[0]
+        store.store_review(review)
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        count_2 = cur.fetchone()[0]
         assert count_1 == count_2
 
-
-# --- Edge queries ---
-
-
-class TestEdgeQueries:
-    def test_get_edges_by_source(self, store: GrippyStore) -> None:
-        """Query edges by source node ID."""
+    def test_duplicate_store_no_duplicate_edges(self, store: GrippyStore) -> None:
+        """Storing the same review twice doesn't create duplicate edges."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        finding_node = next(n for n in graph.nodes if n.type == NodeType.FINDING)
-        edges = store.get_edges_by_source(finding_node.id)
-        assert len(edges) > 0
-        assert all(e["source_id"] == finding_node.id for e in edges)
+        store.store_review(review)
+        cur = store._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM edges")
+        count_1 = cur.fetchone()[0]
+        store.store_review(review)
+        cur.execute("SELECT COUNT(*) FROM edges")
+        count_2 = cur.fetchone()[0]
+        assert count_1 == count_2
 
-    def test_get_edges_by_type(self, store: GrippyStore) -> None:
-        """Query edges by edge type."""
-        review = _make_review(findings=[_make_finding(governance_rule_id="SEC-001")])
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        edges = store.get_edges_by_type(EdgeType.VIOLATES)
-        assert len(edges) == 1
-        assert edges[0]["edge_type"] == "VIOLATES"
+    def test_upsert_updates_metadata(self, store: GrippyStore) -> None:
+        """UPSERT updates node metadata when evidence changes between runs."""
+        finding_v1 = _make_finding(evidence="old evidence")
+        review_v1 = _make_review(findings=[finding_v1])
+        store.store_review(review_v1)
 
-    def test_get_edges_by_target(self, store: GrippyStore) -> None:
-        """Query edges by target node ID."""
+        # Second store with updated evidence (same fingerprint = same file+category+title)
+        finding_v2 = _make_finding(evidence="new evidence")
+        review_v2 = _make_review(findings=[finding_v2])
+        store.store_review(review_v2)
+
+        cur = store._conn.cursor()
+        cur.execute("SELECT data FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        row = cur.fetchone()
+        data = json.loads(row["data"])
+        assert data["evidence"] == "new evidence"
+
+    def test_upsert_preserves_resolved_status(self, store: GrippyStore) -> None:
+        """UPSERT preserves 'resolved' status — doesn't revert to 'open'."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        file_node = next(n for n in graph.nodes if n.type == NodeType.FILE)
-        edges = store.get_edges_by_target(file_node.id)
-        assert len(edges) > 0
-        assert all(e["target_id"] == file_node.id for e in edges)
+        store.store_review(review, session_id="pr-1")
+
+        # Mark finding as resolved
+        cur = store._conn.cursor()
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        finding_id = cur.fetchone()["id"]
+        store.update_finding_status(finding_id, FindingStatus.RESOLVED)
+
+        # Re-store the same review — status should stay 'resolved'
+        store.store_review(review, session_id="pr-1")
+        cur.execute("SELECT status FROM nodes WHERE id = ?", (finding_id,))
+        assert cur.fetchone()["status"] == "resolved"
 
 
-# --- Author tendencies ---
+# --- Author tendencies (single-pass SQL join) ---
 
 
 class TestAuthorTendencies:
@@ -250,8 +384,7 @@ class TestAuthorTendencies:
     def test_returns_findings_for_author(self, store: GrippyStore) -> None:
         """Returns finding nodes connected to the author's reviews."""
         review = _make_review(author="nelson")
-        graph = review_to_graph(review)
-        store.store_review(graph)
+        store.store_review(review)
         tendencies = store.get_author_tendencies("nelson")
         assert len(tendencies) > 0
 
@@ -269,8 +402,8 @@ class TestAuthorTendencies:
             timestamp="2026-02-26T12:01:00Z",
             findings=[_make_finding(id="F-002", title="Bob's bug", file="b.py", line_start=1)],
         )
-        store.store_review(review_to_graph(review_a))
-        store.store_review(review_to_graph(review_b))
+        store.store_review(review_a)
+        store.store_review(review_b)
         alice_tendencies = store.get_author_tendencies("alice")
         bob_tendencies = store.get_author_tendencies("bob")
         alice_titles = {t["title"] for t in alice_tendencies}
@@ -279,8 +412,30 @@ class TestAuthorTendencies:
         assert "Alice's bug" not in bob_titles
         assert "Bob's bug" in bob_titles
 
+    def test_traverses_extracted_from_and_reviewed_by(self, store: GrippyStore) -> None:
+        """Tendencies traverse Finding -[EXTRACTED_FROM]-> Review -[REVIEWED_BY]-> Author."""
+        review = _make_review(author="testdev")
+        store.store_review(review)
 
-# --- File patterns ---
+        # Verify the edges exist
+        cur = store._conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM edges WHERE relationship = ?",
+            (EdgeType.EXTRACTED_FROM.value,),
+        )
+        assert cur.fetchone()[0] > 0
+        cur.execute(
+            "SELECT COUNT(*) FROM edges WHERE relationship = ?",
+            (EdgeType.REVIEWED_BY.value,),
+        )
+        assert cur.fetchone()[0] > 0
+
+        # The join should work
+        tendencies = store.get_author_tendencies("testdev")
+        assert len(tendencies) > 0
+
+
+# --- File patterns (single-pass SQL join) ---
 
 
 class TestFilePatterns:
@@ -294,10 +449,25 @@ class TestFilePatterns:
         review = _make_review(
             findings=[_make_finding(file="src/routes.py", line_start=10, title="XSS vuln")]
         )
-        store.store_review(review_to_graph(review))
+        store.store_review(review)
         patterns = store.get_patterns_for_file("src/routes.py")
         assert len(patterns) > 0
         assert patterns[0]["title"] == "XSS vuln"
+
+    def test_traverses_found_in_edges(self, store: GrippyStore) -> None:
+        """Patterns traverse Finding -[FOUND_IN]-> File."""
+        review = _make_review(findings=[_make_finding(file="src/app.py")])
+        store.store_review(review)
+
+        cur = store._conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM edges WHERE relationship = ?",
+            (EdgeType.FOUND_IN.value,),
+        )
+        assert cur.fetchone()[0] > 0
+
+        patterns = store.get_patterns_for_file("src/app.py")
+        assert len(patterns) > 0
 
 
 # --- Vector search ---
@@ -307,7 +477,7 @@ class TestVectorSearch:
     def test_search_returns_results(self, store: GrippyStore) -> None:
         """Semantic search returns matching nodes."""
         review = _make_review(findings=[_make_finding(title="SQL injection in query builder")])
-        store.store_review(review_to_graph(review))
+        store.store_review(review)
         results = store.search_nodes("SQL injection", k=5)
         assert len(results) > 0
 
@@ -323,22 +493,21 @@ class TestVectorSearch:
             for i in range(10)
         ]
         review = _make_review(findings=findings)
-        store.store_review(review_to_graph(review))
+        store.store_review(review)
         results = store.search_nodes("bug", k=3)
         assert len(results) <= 3
 
 
-# --- Resolution queries ---
+# --- Resolution queries (lifecycle) ---
 
 
 class TestResolutionQueries:
-    """GrippyStore resolution matching for finding lifecycle."""
+    """Finding lifecycle: prior findings, status updates."""
 
     def test_get_prior_findings_returns_open_findings(self, store: GrippyStore) -> None:
         """get_prior_findings returns findings with status='open'."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph, session_id="pr-1")
+        store.store_review(review, session_id="pr-1")
         findings = store.get_prior_findings(session_id="pr-1")
         assert len(findings) > 0
         for f in findings:
@@ -350,17 +519,14 @@ class TestResolutionQueries:
         assert findings == []
 
     def test_get_prior_findings_scoped_by_session(self, store: GrippyStore) -> None:
-        """Prior findings are scoped to session_id (PR), not individual review."""
-        # Round 1: store with session_id
+        """Prior findings are scoped to session_id (PR)."""
         review_r1 = _make_review(
             title="feat: auth",
             timestamp="2026-02-26T12:00:00Z",
             findings=[_make_finding(title="SQL injection", file="auth.py")],
         )
-        graph_r1 = review_to_graph(review_r1)
-        store.store_review(graph_r1, session_id="pr-5")
+        store.store_review(review_r1, session_id="pr-5")
 
-        # Round 2: query BEFORE storing — should see round 1's findings
         prior = store.get_prior_findings(session_id="pr-5")
         assert len(prior) == 1
         assert prior[0]["title"] == "SQL injection"
@@ -377,8 +543,8 @@ class TestResolutionQueries:
             timestamp="2026-02-26T12:01:00Z",
             findings=[_make_finding(title="Bug in PR 6", file="b.py")],
         )
-        store.store_review(review_to_graph(review_pr5), session_id="pr-5")
-        store.store_review(review_to_graph(review_pr6), session_id="pr-6")
+        store.store_review(review_pr5, session_id="pr-5")
+        store.store_review(review_pr6, session_id="pr-6")
 
         prior_5 = store.get_prior_findings(session_id="pr-5")
         prior_6 = store.get_prior_findings(session_id="pr-6")
@@ -386,86 +552,52 @@ class TestResolutionQueries:
         assert all(f["title"] == "Bug in PR 6" for f in prior_6)
 
     def test_update_finding_status(self, store: GrippyStore) -> None:
-        """update_finding_status changes a finding's status in node_meta."""
-        import json as _json
-
+        """update_finding_status updates both the status column and JSON data."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
-        assert len(finding_nodes) > 0
-        nid = finding_nodes[0].id
-        store.update_finding_status(nid, "resolved")
+        store.store_review(review)
         cur = store._conn.cursor()
-        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
-        props = _json.loads(cur.fetchone()["properties"])
-        assert props["status"] == "resolved"
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        nid = cur.fetchone()["id"]
 
+        store.update_finding_status(nid, "resolved")
 
-# --- Migration safety (Commit 4, Issue #4) ---
+        # Check real column
+        cur.execute("SELECT status FROM nodes WHERE id = ?", (nid,))
+        assert cur.fetchone()["status"] == "resolved"
 
-
-class TestUpdateFindingStatusWithEnum:
-    """update_finding_status accepts FindingStatus enum."""
+        # Check JSON data sync
+        cur.execute("SELECT data FROM nodes WHERE id = ?", (nid,))
+        data = json.loads(cur.fetchone()["data"])
+        assert data["status"] == "resolved"
 
     def test_update_finding_status_with_enum(self, store: GrippyStore) -> None:
-        """update_finding_status accepts FindingStatus.RESOLVED."""
-        import json as _json
-
-        from grippy.graph import FindingStatus
-
+        """update_finding_status accepts FindingStatus enum."""
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
-        finding_nodes = [n for n in graph.nodes if n.type.value == "FINDING"]
-        assert len(finding_nodes) > 0
-        nid = finding_nodes[0].id
-        store.update_finding_status(nid, FindingStatus.RESOLVED)
+        store.store_review(review)
         cur = store._conn.cursor()
-        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (nid,))
-        props = _json.loads(cur.fetchone()["properties"])
-        assert props["status"] == "resolved"
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        nid = cur.fetchone()["id"]
+
+        store.update_finding_status(nid, FindingStatus.RESOLVED)
+
+        cur.execute("SELECT status FROM nodes WHERE id = ?", (nid,))
+        assert cur.fetchone()["status"] == "resolved"
+
+    def test_resolved_findings_excluded_from_prior(self, store: GrippyStore) -> None:
+        """Resolved findings are not returned by get_prior_findings."""
+        review = _make_review()
+        store.store_review(review, session_id="pr-1")
+        cur = store._conn.cursor()
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        nid = cur.fetchone()["id"]
+
+        store.update_finding_status(nid, FindingStatus.RESOLVED)
+
+        prior = store.get_prior_findings(session_id="pr-1")
+        assert len(prior) == 0
 
 
-class TestMigrationSafety:
-    """Migration error handling: ignore 'already exists', propagate real errors."""
-
-    def test_real_error_propagates(self, tmp_path: Path) -> None:
-        """OperationalError without 'already exists' propagates."""
-        import grippy.persistence as persistence_mod
-
-        # Inject a migration that triggers a real error (invalid SQL)
-        original_migrations = persistence_mod._MIGRATIONS
-        persistence_mod._MIGRATIONS = [
-            "ALTER TABLE nonexistent_table ADD COLUMN bad_col TEXT",
-        ]
-        try:
-            with pytest.raises(sqlite3.OperationalError, match="no such table"):
-                GrippyStore(
-                    graph_db_path=tmp_path / "test.db",
-                    lance_dir=tmp_path / "lance",
-                    embedder=_FakeEmbedder(),
-                )
-        finally:
-            persistence_mod._MIGRATIONS = original_migrations
-
-    def test_already_exists_ignored(self, tmp_path: Path) -> None:
-        """First init creates column, second init silently ignores 'already exists'."""
-        GrippyStore(
-            graph_db_path=tmp_path / "test.db",
-            lance_dir=tmp_path / "lance",
-            embedder=_FakeEmbedder(),
-        )
-        # Second init — migration should not raise
-        store2 = GrippyStore(
-            graph_db_path=tmp_path / "test.db",
-            lance_dir=tmp_path / "lance2",
-            embedder=_FakeEmbedder(),
-        )
-        assert store2 is not None
-
-
-# --- Batch embedding protocol (Commit 4, Issue #8) ---
+# --- Batch embedding protocol ---
 
 
 class _FakeBatchEmbedder:
@@ -493,16 +625,12 @@ class TestBatchEmbedding:
             embedder=embedder,
         )
         review = _make_review()
-        graph = review_to_graph(review)
 
         with patch.object(
             embedder, "get_embedding_batch", wraps=embedder.get_embedding_batch
         ) as mock_batch:
-            store.store_review(graph)
-            # Batch should be called once with all texts
+            store.store_review(review)
             mock_batch.assert_called_once()
-            texts_arg = mock_batch.call_args[0][0]
-            assert len(texts_arg) == len(graph.nodes)
 
     def test_single_embedder_fallback(self, tmp_path: Path) -> None:
         """Embedder without get_embedding_batch falls back to individual calls."""
@@ -513,12 +641,10 @@ class TestBatchEmbedding:
             embedder=embedder,
         )
         review = _make_review()
-        graph = review_to_graph(review)
 
         with patch.object(embedder, "get_embedding", wraps=embedder.get_embedding) as mock_single:
-            store.store_review(graph)
-            # Single should be called N times (once per node)
-            assert mock_single.call_count == len(graph.nodes)
+            store.store_review(review)
+            assert mock_single.call_count > 0
 
     def test_batch_embedder_stores_correct_vectors(self, tmp_path: Path) -> None:
         """Batch result vectors are correctly associated with their records."""
@@ -529,12 +655,10 @@ class TestBatchEmbedding:
             embedder=embedder,
         )
         review = _make_review()
-        graph = review_to_graph(review)
-        store.store_review(graph)
+        store.store_review(review)
 
         nodes = store.get_all_nodes()
         assert len(nodes) > 0
-        # Each node should have a vector
         for node in nodes:
             assert "vector" in node
             assert len(node["vector"]) == EMBED_DIM

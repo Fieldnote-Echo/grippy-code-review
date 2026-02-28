@@ -29,7 +29,7 @@ from typing import Any
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
-from grippy.graph import FindingStatus, review_to_graph
+from grippy.graph import FindingStatus
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 
@@ -347,7 +347,7 @@ def main() -> None:
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
-    # 6. Build graph, get prior findings, THEN persist (non-fatal)
+    # 6. Get prior findings, THEN persist review (non-fatal)
     session_id = f"pr-{pr_event['pr_number']}"
     prior_findings: list[dict[str, Any]] = []
     store: GrippyStore | None = None
@@ -358,7 +358,6 @@ def main() -> None:
             model=embedding_model,
             base_url=base_url,
         )
-        graph = review_to_graph(review)
         store = GrippyStore(
             graph_db_path=data_dir / "grippy-graph.db",
             lance_dir=data_dir / "lance",
@@ -369,8 +368,8 @@ def main() -> None:
             prior_findings = store.get_prior_findings(session_id=session_id)
         except Exception:
             prior_findings = []
-        store.store_review(graph, session_id=session_id)
-        print(f"  Graph: {len(graph.nodes)} nodes persisted")
+        store.store_review(review, session_id=session_id)
+        print(f"  Review persisted ({len(review.findings)} findings)")
     except Exception as exc:
         print(f"::warning::Graph persistence failed: {exc}")
 

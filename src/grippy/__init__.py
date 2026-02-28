@@ -13,15 +13,10 @@ from grippy.github_review import (
     resolve_threads,
 )
 from grippy.graph import (
-    Edge,
     EdgeType,
     FindingLifecycle,
-    Node,
     NodeType,
-    ReviewGraph,
     cross_reference_findings,
-    node_id,
-    review_to_graph,
 )
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
@@ -34,14 +29,11 @@ from grippy.schema import GrippyReview
 __all__ = [
     "CodebaseIndex",
     "CodebaseToolkit",
-    "Edge",
     "EdgeType",
     "FindingLifecycle",
     "GrippyReview",
     "GrippyStore",
-    "Node",
     "NodeType",
-    "ReviewGraph",
     "ReviewParseError",
     "build_review_comment",
     "classify_findings",
@@ -50,12 +42,10 @@ __all__ = [
     "cross_reference_findings",
     "format_summary_comment",
     "load_pr_event",
-    "node_id",
     "parse_diff_lines",
     "post_review",
     "resolve_findings_against_prior",
     "resolve_threads",
-    "review_to_graph",
     "run_review",
     "truncate_diff",
 ]
