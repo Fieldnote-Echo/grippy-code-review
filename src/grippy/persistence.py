@@ -396,7 +396,13 @@ class GrippyStore:
 
         table = self._ensure_nodes_table()
         if table is None:
-            self._nodes_table = self._lance_db.create_table("nodes", data=records)
+            try:
+                self._nodes_table = self._lance_db.create_table("nodes", data=records)
+            except OSError:
+                # Table exists on disk but wasn't visible to list_tables()
+                # (stale cache metadata). Fall back to open + add.
+                self._nodes_table = self._lance_db.open_table("nodes")
+                self._nodes_table.add(records)
         else:
             arrow_tbl = table.to_arrow()
             existing_ids = set(arrow_tbl.column("node_id").to_pylist())
