@@ -37,12 +37,21 @@ from grippy.retry import ReviewParseError, run_review
 MAX_DIFF_CHARS = 200_000
 
 
+_ERROR_HINTS: dict[str, str] = {
+    "CONFIG ERROR": "Valid `GRIPPY_TRANSPORT` values: `openai`, `local`.",
+    "TIMEOUT": "Increase `GRIPPY_TIMEOUT` or reduce PR diff size.",
+}
+
+
 def _failure_comment(repo: str, error_type: str) -> str:
     """Build a generic error comment for posting to a PR."""
+    hint = _ERROR_HINTS.get(error_type, "")
+    hint_line = f"\n\n{hint}" if hint else ""
     return (
         f"## \u274c Grippy Review \u2014 {error_type}\n\n"
         "Review failed. Check the "
-        f"[Actions log](https://github.com/{repo}/actions) for details.\n\n"
+        f"[Actions log](https://github.com/{repo}/actions) for details."
+        f"{hint_line}\n\n"
         "<!-- grippy-error -->"
     )
 

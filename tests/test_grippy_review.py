@@ -11,6 +11,7 @@ import pytest
 
 from grippy.review import (
     MAX_DIFF_CHARS,
+    _failure_comment,
     _with_timeout,
     fetch_pr_diff,
     load_pr_event,
@@ -277,6 +278,26 @@ class TestPostComment:
         post_comment("token", "org/repo", 42, "Error comment")
 
         mock_pr.create_issue_comment.assert_called_once()
+
+
+class TestFailureComment:
+    def test_config_error_includes_transport_hint(self) -> None:
+        body = _failure_comment("o/r", "CONFIG ERROR")
+        assert "CONFIG ERROR" in body
+        assert "GRIPPY_TRANSPORT" in body
+        assert "openai" in body
+        assert "local" in body
+
+    def test_timeout_includes_hint(self) -> None:
+        body = _failure_comment("o/r", "TIMEOUT")
+        assert "TIMEOUT" in body
+        assert "GRIPPY_TIMEOUT" in body
+
+    def test_generic_error_has_no_hint(self) -> None:
+        body = _failure_comment("o/r", "ERROR")
+        assert "ERROR" in body
+        assert "GRIPPY_TRANSPORT" not in body
+        assert "Actions log" in body
 
 
 # --- T1: main() uses run_review + review_to_graph + GrippyStore ---

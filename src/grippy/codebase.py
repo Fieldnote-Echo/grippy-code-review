@@ -463,10 +463,17 @@ def _make_list_files(repo_root: Path) -> Any:
 
         try:
             resolved_root = repo_root.resolve()
-            raw = sorted(target.glob(glob_pattern))
-            entries = [
-                e for e in raw[:_MAX_GLOB_RESULTS] if e.resolve().is_relative_to(resolved_root)
-            ]
+            # Collect up to _MAX_GLOB_RESULTS+1 entries lazily to detect truncation
+            # without expanding/sorting the entire glob iterator.
+            collected: list[Path] = []
+            truncated = False
+            for entry in target.glob(glob_pattern):
+                if entry.resolve().is_relative_to(resolved_root):
+                    collected.append(entry)
+                    if len(collected) > _MAX_GLOB_RESULTS:
+                        truncated = True
+                        break
+            entries = sorted(collected[:_MAX_GLOB_RESULTS])
         except (OSError, ValueError, RuntimeError) as e:
             return f"Error listing files: {e}"
 
@@ -478,6 +485,13 @@ def _make_list_files(repo_root: Path) -> Any:
 
         if not lines:
             return f"No files matching '{glob_pattern}' in {path}/"
+
+        if truncated:
+            lines.insert(
+                0,
+                f"[truncated] showing first {_MAX_GLOB_RESULTS} results; "
+                "refine glob_pattern for complete listing",
+            )
 
         return _limit_result("\n".join(lines))
 

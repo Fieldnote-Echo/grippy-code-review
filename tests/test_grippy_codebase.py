@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from grippy.codebase import (
+    _MAX_GLOB_RESULTS,
     _MAX_RESULT_CHARS,
     CodebaseIndex,
     CodebaseToolkit,
@@ -494,6 +495,30 @@ class TestListFilesTool:
         list_fn = _make_list_files(repo_root)
         result = list_fn(".", "../../*")
         assert "outside.py" not in result
+
+    def test_list_files_truncation_notice(self, tmp_path: Path) -> None:
+        """Glob results exceeding _MAX_GLOB_RESULTS show a truncation notice."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        for i in range(_MAX_GLOB_RESULTS + 10):
+            (repo_root / f"file_{i:05d}.txt").write_text("x")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "*.txt")
+        assert "[truncated]" in result
+        assert str(_MAX_GLOB_RESULTS) in result
+
+    def test_list_files_no_truncation_within_limit(self, tmp_path: Path) -> None:
+        """Glob results within _MAX_GLOB_RESULTS have no truncation notice."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        for i in range(5):
+            (repo_root / f"file_{i}.txt").write_text("x")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "*.txt")
+        assert "[truncated]" not in result
+        assert "file_0.txt" in result
 
 
 # --- CodebaseToolkit tests ---
