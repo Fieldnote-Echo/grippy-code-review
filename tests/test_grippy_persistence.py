@@ -278,6 +278,46 @@ class TestGrippyStoreInit:
         nodes = store.get_all_nodes()
         assert len(nodes) > 0
 
+    def test_v1_migration_preserves_v2_nodes(self, tmp_path: Path) -> None:
+        """v1 edges + v2 nodes (mixed state): migration drops edges but preserves nodes."""
+        db_path = tmp_path / "grippy-graph.db"
+        import sqlite3
+
+        conn = sqlite3.connect(str(db_path))
+        # v1 edges
+        conn.execute(
+            "CREATE TABLE edges (source_id TEXT, edge_type TEXT, target_id TEXT, metadata TEXT)"
+        )
+        # v2 nodes (has session_id column)
+        conn.execute(
+            "CREATE TABLE nodes ("
+            "id TEXT PRIMARY KEY, type TEXT NOT NULL, label TEXT NOT NULL, "
+            "data TEXT NOT NULL DEFAULT '{}', session_id TEXT, status TEXT, "
+            "fingerprint TEXT, created_at TEXT NOT NULL, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, type, label, created_at) "
+            "VALUES ('n1', 'finding', 'test', '2026-01-01')"
+        )
+        conn.commit()
+        conn.close()
+
+        store = GrippyStore(
+            graph_db_path=db_path,
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+
+        # v1 edges should be gone, v2 nodes should be preserved
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA table_info(edges)")
+        edge_cols = {row[1] for row in cur.fetchall()}
+        assert "source" in edge_cols  # v2 schema
+        assert "source_id" not in edge_cols
+
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        assert cur.fetchone()[0] == 1  # preserved
+
     def test_v2_schema_not_dropped(self, tmp_path: Path) -> None:
         """Opening a DB that already has v2 schema preserves existing data."""
         db_path = tmp_path / "grippy-graph.db"

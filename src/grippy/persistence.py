@@ -160,10 +160,16 @@ class GrippyStore:
             cur.execute("PRAGMA table_info(edges)")
             columns = {row[1] for row in cur.fetchall()}
             if "source_id" in columns:
-                # v1 schema — drop everything and start fresh
+                # v1 edges — always drop
                 cur.execute("DROP TABLE IF EXISTS edges")
                 cur.execute("DROP TABLE IF EXISTS node_meta")
-                cur.execute("DROP TABLE IF EXISTS nodes")
+                # Only drop nodes if it also has v1 schema (no session_id column)
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes'")
+                if cur.fetchone() is not None:
+                    cur.execute("PRAGMA table_info(nodes)")
+                    node_columns = {row[1] for row in cur.fetchall()}
+                    if "session_id" not in node_columns:
+                        cur.execute("DROP TABLE IF EXISTS nodes")
 
     @staticmethod
     def _add_updated_at_column(cur: sqlite3.Cursor) -> None:
