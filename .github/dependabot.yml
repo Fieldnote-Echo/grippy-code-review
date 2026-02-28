@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    versioning-strategy: "increase-if-necessary"
+    open-pull-requests-limit: 10
+    groups:
+      production-minor-patch:
+        dependency-type: "production"
+        update-types: ["minor", "patch"]
+      development-dependencies:
+        dependency-type: "development"
+        update-types: ["minor", "patch"]
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # GitHub Actions versions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

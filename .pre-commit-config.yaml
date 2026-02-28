@@ -1,0 +1,47 @@
+# Pre-commit hooks
+# Install: pre-commit install
+# Run all: pre-commit run --all-files
+
+repos:
+  # Basic file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-merge-conflict
+
+  # SPDX license header enforcement
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.6
+    hooks:
+      - id: insert-license
+        name: "SPDX license header"
+        files: \.py$
+        args:
+          - --license-filepath
+          - .license-header.txt
+          - --comment-style
+          - "#"
+          - --no-extra-eol
+          - --detect-license-in-X-top-lines=3
+          - --allow-past-years
+
+  # Linting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Secret detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
