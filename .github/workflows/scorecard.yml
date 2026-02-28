@@ -7,7 +7,7 @@ on:
     - cron: "15 6 * * 1"  # Monday 06:15 UTC
   workflow_dispatch:
 
-permissions: read-all
+permissions: {}
 
 concurrency:
   group: scorecard
