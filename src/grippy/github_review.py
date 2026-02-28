@@ -376,11 +376,12 @@ def post_review(
         off_diff.extend(failed_findings)
 
     # 5. Resolve threads for findings no longer present (non-fatal)
+    actual_resolved = 0
     if resolved_comments:
         try:
             thread_ids = [c.node_id for c in resolved_comments]
-            resolved_count = resolve_threads(repo=repo, pr_number=pr_number, thread_ids=thread_ids)
-            print(f"  Resolved {resolved_count}/{len(thread_ids)} threads")
+            actual_resolved = resolve_threads(repo=repo, pr_number=pr_number, thread_ids=thread_ids)
+            print(f"  Resolved {actual_resolved}/{len(thread_ids)} threads")
         except Exception as exc:
             print(f"::warning::Thread resolution failed: {exc}")
 
@@ -390,7 +391,7 @@ def post_review(
         verdict=verdict,
         finding_count=len(findings),
         new_count=len(new_findings),
-        resolved_count=len(resolved_comments),
+        resolved_count=actual_resolved,
         off_diff_findings=off_diff,
         head_sha=head_sha,
         pr_number=pr_number,

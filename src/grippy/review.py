@@ -45,10 +45,14 @@ def _failure_comment(repo: str, error_type: str) -> str:
     """Build a generic error comment for posting to a PR."""
     hint = _ERROR_HINTS.get(error_type, "")
     hint_line = f"\n\n{hint}" if hint else ""
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_id:
+        log_url = f"https://github.com/{repo}/actions/runs/{run_id}"
+    else:
+        log_url = f"https://github.com/{repo}/actions"
     return (
         f"## \u274c Grippy Review \u2014 {error_type}\n\n"
-        "Review failed. Check the "
-        f"[Actions log](https://github.com/{repo}/actions) for details."
+        f"Review failed. Check the [Actions log]({log_url}) for details."
         f"{hint_line}\n\n"
         "<!-- grippy-error -->"
     )

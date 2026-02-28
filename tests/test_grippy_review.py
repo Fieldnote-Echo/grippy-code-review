@@ -299,6 +299,17 @@ class TestFailureComment:
         assert "GRIPPY_TRANSPORT" not in body
         assert "Actions log" in body
 
+    def test_includes_run_id_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+        body = _failure_comment("o/r", "ERROR")
+        assert "actions/runs/12345" in body
+
+    def test_falls_back_to_generic_actions_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+        body = _failure_comment("o/r", "ERROR")
+        assert "o/r/actions" in body
+        assert "runs" not in body
+
 
 # --- main() wiring ---
 
