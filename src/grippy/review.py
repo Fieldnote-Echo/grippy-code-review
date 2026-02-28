@@ -32,7 +32,6 @@ from grippy.github_review import post_review
 from grippy.graph import FindingStatus, review_to_graph
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
-from grippy.schema import GrippyReview
 
 # Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
 MAX_DIFF_CHARS = 200_000
@@ -60,40 +59,6 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
         "base_ref": pr["base"]["ref"],
         "description": pr.get("body") or "",
     }
-
-
-def parse_review_response(content: Any) -> GrippyReview:
-    """Parse agent response content into GrippyReview.
-
-    Handles three response shapes from Agno:
-    - GrippyReview instance (structured output worked)
-    - dict (parsed JSON object)
-    - str (raw JSON string)
-
-    Raises:
-        ValueError: If content can't be parsed or validated.
-    """
-    if isinstance(content, GrippyReview):
-        return content
-    if isinstance(content, dict):
-        try:
-            return GrippyReview.model_validate(content)
-        except Exception as exc:
-            msg = f"Failed to validate review dict: {exc}"
-            raise ValueError(msg) from exc
-    if isinstance(content, str):
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            msg = f"Failed to parse review response as JSON: {exc}"
-            raise ValueError(msg) from exc
-        try:
-            return GrippyReview.model_validate(data)
-        except Exception as exc:
-            msg = f"Failed to validate review JSON: {exc}"
-            raise ValueError(msg) from exc
-    msg = f"Unexpected response type: {type(content).__name__}"
-    raise ValueError(msg)
 
 
 def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:

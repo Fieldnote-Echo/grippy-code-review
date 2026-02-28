@@ -27,7 +27,6 @@ from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.review import (
     load_pr_event,
-    parse_review_response,
     truncate_diff,
 )
 from grippy.schema import GrippyReview
@@ -53,7 +52,6 @@ __all__ = [
     "load_pr_event",
     "node_id",
     "parse_diff_lines",
-    "parse_review_response",
     "post_review",
     "resolve_findings_against_prior",
     "resolve_threads",

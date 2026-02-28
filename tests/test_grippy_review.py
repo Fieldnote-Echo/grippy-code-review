@@ -14,7 +14,6 @@ from grippy.review import (
     _with_timeout,
     fetch_pr_diff,
     load_pr_event,
-    parse_review_response,
     post_comment,
     truncate_diff,
 )
@@ -174,42 +173,6 @@ class TestLoadPrEvent:
 
         result = load_pr_event(event_path)
         assert result["description"] == ""
-
-
-# --- format_review_comment ---
-
-
-# --- parse_review_response ---
-
-
-class TestParseReviewResponse:
-    def test_parses_model_instance(self) -> None:
-        """Direct GrippyReview instance passes through."""
-        review = _make_review()
-        result = parse_review_response(review)
-        assert result.score.overall == 72
-
-    def test_parses_dict(self) -> None:
-        """Dict is validated as GrippyReview."""
-        review = _make_review()
-        result = parse_review_response(review.model_dump())
-        assert result.score.overall == 72
-
-    def test_parses_json_string(self) -> None:
-        """JSON string is parsed and validated."""
-        review = _make_review()
-        result = parse_review_response(review.model_dump_json())
-        assert result.score.overall == 72
-
-    def test_invalid_json_raises(self) -> None:
-        """Non-JSON string raises ValueError."""
-        with pytest.raises(ValueError, match="parse"):
-            parse_review_response("not json at all")
-
-    def test_invalid_schema_raises(self) -> None:
-        """JSON that doesn't match schema raises ValueError."""
-        with pytest.raises(ValueError, match="validat"):
-            parse_review_response(json.dumps({"version": "1.0"}))
 
 
 # --- C1: fetch_pr_diff uses raw diff API, not paginated compare ---
