@@ -403,7 +403,7 @@ def _make_read_file(repo_root: Path) -> Any:
         # Prevent path traversal
         try:
             target = target.resolve()
-            if not str(target).startswith(str(repo_root.resolve())):
+            if not target.is_relative_to(repo_root.resolve()):
                 return "Error: path traversal not allowed."
         except (OSError, ValueError):
             return "Error: invalid path."
@@ -448,7 +448,7 @@ def _make_list_files(repo_root: Path) -> Any:
         # Prevent path traversal
         try:
             target = target.resolve()
-            if not str(target).startswith(str(repo_root.resolve())):
+            if not target.is_relative_to(repo_root.resolve()):
                 return "Error: path traversal not allowed."
         except (OSError, ValueError):
             return "Error: invalid path."
@@ -457,7 +457,11 @@ def _make_list_files(repo_root: Path) -> Any:
             return f"Directory not found: {path}"
 
         try:
-            entries = sorted(target.glob(glob_pattern))
+            resolved_root = repo_root.resolve()
+            entries = sorted(
+                e for e in target.glob(glob_pattern)
+                if e.resolve().is_relative_to(resolved_root)
+            )
         except (OSError, ValueError) as e:
             return f"Error listing files: {e}"
 

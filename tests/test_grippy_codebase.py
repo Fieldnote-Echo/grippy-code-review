@@ -421,6 +421,20 @@ class TestReadFileTool:
         result = read("../../etc/passwd")
         assert "not allowed" in result.lower() or "not found" in result.lower()
 
+    def test_read_file_rejects_prefix_bypass(self, tmp_path: Path) -> None:
+        """H1: startswith bypass via shared prefix — e.g. /repo vs /repo-evil."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("safe content")
+
+        evil_dir = tmp_path / "repo-evil"
+        evil_dir.mkdir()
+        (evil_dir / "secrets.py").write_text("stolen secrets")
+
+        read_fn = _make_read_file(repo_root)
+        result = read_fn("../repo-evil/secrets.py")
+        assert "path traversal not allowed" in result.lower()
+
 
 # --- list_files tool tests ---
 
@@ -453,6 +467,33 @@ class TestListFilesTool:
         ls = _make_list_files(tmp_repo)
         result = ls("../..")
         assert "not allowed" in result.lower() or "not found" in result.lower()
+
+    def test_list_files_rejects_prefix_bypass(self, tmp_path: Path) -> None:
+        """H1: startswith bypass in list_files."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("x")
+
+        evil_dir = tmp_path / "repo-evil"
+        evil_dir.mkdir()
+        (evil_dir / "secrets.py").write_text("stolen")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn("../repo-evil")
+        assert "path traversal not allowed" in result.lower()
+
+    def test_list_files_glob_cannot_escape_boundary(self, tmp_path: Path) -> None:
+        """H2: glob results must be bounded by repo_root."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("x")
+
+        outside = tmp_path / "outside.py"
+        outside.write_text("outside content")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "../../*")
+        assert "outside.py" not in result
 
 
 # --- CodebaseToolkit tests ---
