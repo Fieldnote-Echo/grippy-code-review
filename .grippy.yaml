@@ -1,0 +1,20 @@
+# Grippy review configuration for navi-bootstrap
+# See: src/grippy/ for the Agno-based agent
+
+review:
+  modes: [pr_review, security_audit]
+  default_mode: pr_review
+
+thresholds:
+  pass: 80
+  provisional: 60
+
+personality:
+  catchphrases:
+    grudging_respect:
+      - "Achievement Unlocked: Recursively delicious"
+    triggers:
+      grudging_respect:
+        - self_bootstrap    # output feeds back into input and holds
+        - self_governance   # a system that governs itself cleanly
+        - closed_loop       # any architecture where the loop closes and stays stable

@@ -1,0 +1,63 @@
+name: Grippy Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Grippy Code Review
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache Grippy data
+        uses: actions/cache@v4
+        with:
+          path: ./grippy-data
+          key: grippy-data-${{ github.event.pull_request.number || 'manual' }}-${{ github.sha }}
+          restore-keys: |
+            grippy-data-${{ github.event.pull_request.number || 'manual' }}-
+
+      - name: Install Grippy
+        run: pip install ".[persistence]"
+
+      - name: Run Grippy review
+        id: review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GRIPPY_TRANSPORT: openai
+          GRIPPY_BASE_URL: https://api.openai.com/v1
+          GRIPPY_MODEL_ID: gpt-5.2
+          GRIPPY_EMBEDDING_MODEL: text-embedding-3-large
+          GRIPPY_DATA_DIR: ./grippy-data
+          GRIPPY_TIMEOUT: '300'
+        run: python -m grippy
+
+      - name: Review summary
+        if: always()
+        env:
+          REVIEW_SCORE: ${{ steps.review.outputs.score }}
+          REVIEW_VERDICT: ${{ steps.review.outputs.verdict }}
+          REVIEW_FINDINGS: ${{ steps.review.outputs.findings-count }}
+          REVIEW_BLOCKING: ${{ steps.review.outputs.merge-blocking }}
+        run: |
+          echo "### Grippy Review Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Score: $REVIEW_SCORE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verdict: $REVIEW_VERDICT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Findings: $REVIEW_FINDINGS" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Merge blocking: $REVIEW_BLOCKING" >> "$GITHUB_STEP_SUMMARY"

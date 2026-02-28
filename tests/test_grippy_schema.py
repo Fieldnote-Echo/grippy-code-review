@@ -1,0 +1,391 @@
+"""Tests for Grippy Pydantic schema models."""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from grippy.schema import (
+    AsciiArtKey,
+    ComplexityTier,
+    EscalationCategory,
+    EscalationTarget,
+    Finding,
+    FindingCategory,
+    GrippyReview,
+    Personality,
+    Severity,
+    ToneRegister,
+    VerdictStatus,
+)
+
+# --- Helpers ---
+
+
+def _minimal_finding(**overrides: object) -> dict:
+    """Return a minimal valid Finding dict, with overrides applied."""
+    base: dict = {
+        "id": "F-001",
+        "severity": "CRITICAL",
+        "confidence": 85,
+        "category": "security",
+        "file": "src/main.py",
+        "line_start": 10,
+        "line_end": 15,
+        "title": "SQL injection risk",
+        "description": "User input is interpolated directly into query.",
+        "suggestion": "Use parameterized queries.",
+        "evidence": 'line 12: f"SELECT * FROM {user_input}"',
+        "grippy_note": "Grippy is not amused.",
+    }
+    base.update(overrides)
+    return base
+
+
+def _minimal_review(**overrides: object) -> dict:
+    """Return a minimal valid GrippyReview dict."""
+    base: dict = {
+        "audit_type": "pr_review",
+        "timestamp": "2026-02-25T12:00:00Z",
+        "model": "devstral-small-2-24b-instruct-2512",
+        "pr": {
+            "title": "feat: add login endpoint",
+            "author": "nelson",
+            "branch": "feat/login -> main",
+            "complexity_tier": "STANDARD",
+        },
+        "scope": {
+            "files_in_diff": 3,
+            "files_reviewed": 3,
+            "coverage_percentage": 100.0,
+            "governance_rules_applied": ["SEC-001"],
+            "modes_active": ["pr_review"],
+        },
+        "findings": [_minimal_finding()],
+        "escalations": [],
+        "score": {
+            "overall": 72,
+            "breakdown": {
+                "security": 15,
+                "logic": 20,
+                "governance": 17,
+                "reliability": 10,
+                "observability": 10,
+            },
+            "deductions": {
+                "critical_count": 1,
+                "high_count": 0,
+                "medium_count": 0,
+                "low_count": 0,
+                "total_deduction": 28,
+            },
+        },
+        "verdict": {
+            "status": "FAIL",
+            "threshold_applied": 80,
+            "merge_blocking": True,
+            "summary": "Critical SQL injection finding blocks merge.",
+        },
+        "personality": {
+            "tone_register": "alarmed",
+            "opening_catchphrase": "Oh no, not again...",
+            "closing_line": "Fix this before I lose what's left of my patience.",
+            "ascii_art_key": "critical",
+        },
+        "meta": {
+            "review_duration_ms": 4200,
+            "tokens_used": 3100,
+            "context_files_loaded": 2,
+            "confidence_filter_suppressed": 0,
+            "duplicate_filter_suppressed": 0,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+# --- Enum tests ---
+
+
+class TestEnumValues:
+    """Spot-check enum values to confirm StrEnum mapping."""
+
+    def test_severity_critical(self) -> None:
+        assert Severity.CRITICAL.value == "CRITICAL"
+
+    def test_severity_low(self) -> None:
+        assert Severity.LOW.value == "LOW"
+
+    def test_tone_grudging_respect(self) -> None:
+        assert ToneRegister.GRUDGING_RESPECT.value == "grudging_respect"
+
+    def test_tone_professional(self) -> None:
+        assert ToneRegister.PROFESSIONAL.value == "professional"
+
+    def test_complexity_trivial(self) -> None:
+        assert ComplexityTier.TRIVIAL.value == "TRIVIAL"
+
+    def test_finding_category_security(self) -> None:
+        assert FindingCategory.SECURITY.value == "security"
+
+    def test_escalation_category_compliance(self) -> None:
+        assert EscalationCategory.COMPLIANCE.value == "compliance"
+
+    def test_escalation_target_tech_lead(self) -> None:
+        assert EscalationTarget.TECH_LEAD.value == "tech-lead"
+
+    def test_verdict_pass(self) -> None:
+        assert VerdictStatus.PASS.value == "PASS"
+
+    def test_verdict_provisional(self) -> None:
+        assert VerdictStatus.PROVISIONAL.value == "PROVISIONAL"
+
+    def test_ascii_art_all_clear(self) -> None:
+        assert AsciiArtKey.ALL_CLEAR.value == "all_clear"
+
+
+# --- Finding constraint tests ---
+
+
+class TestFindingConstraints:
+    """Verify Field constraints on the Finding model."""
+
+    def test_confidence_below_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="confidence"):
+            Finding(**_minimal_finding(confidence=-1))
+
+    def test_confidence_above_100_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="confidence"):
+            Finding(**_minimal_finding(confidence=101))
+
+    def test_confidence_at_boundaries_accepted(self) -> None:
+        f0 = Finding(**_minimal_finding(confidence=0))
+        f100 = Finding(**_minimal_finding(confidence=100))
+        assert f0.confidence == 0
+        assert f100.confidence == 100
+
+    def test_grippy_note_max_length_rejected(self) -> None:
+        long_note = "x" * 281
+        with pytest.raises(ValidationError, match="grippy_note"):
+            Finding(**_minimal_finding(grippy_note=long_note))
+
+    def test_grippy_note_at_max_length_accepted(self) -> None:
+        note_280 = "x" * 280
+        f = Finding(**_minimal_finding(grippy_note=note_280))
+        assert len(f.grippy_note) == 280
+
+
+# --- Optional field tests ---
+
+
+class TestOptionalFields:
+    """Verify optional/nullable fields accept None."""
+
+    def test_finding_governance_rule_id_none(self) -> None:
+        f = Finding(**_minimal_finding(governance_rule_id=None))
+        assert f.governance_rule_id is None
+
+    def test_finding_governance_rule_id_present(self) -> None:
+        f = Finding(**_minimal_finding(governance_rule_id="SEC-001"))
+        assert f.governance_rule_id == "SEC-001"
+
+    def test_personality_disguise_used_none(self) -> None:
+        p = Personality(
+            tone_register="grumpy",
+            opening_catchphrase="Ugh.",
+            closing_line="Don't let me catch you again.",
+            disguise_used=None,
+            ascii_art_key="standard",
+        )
+        assert p.disguise_used is None
+
+    def test_personality_disguise_used_present(self) -> None:
+        p = Personality(
+            tone_register="grumpy",
+            opening_catchphrase="Ugh.",
+            closing_line="Don't let me catch you again.",
+            disguise_used="trenchcoat inspector",
+            ascii_art_key="standard",
+        )
+        assert p.disguise_used == "trenchcoat inspector"
+
+
+# --- GrippyReview round-trip ---
+
+
+class TestGrippyReviewRoundTrip:
+    """Construct -> dump -> validate round-trip on the top-level model."""
+
+    def test_round_trip_serialization(self) -> None:
+        review = GrippyReview(**_minimal_review())
+        dumped = review.model_dump()
+
+        assert isinstance(dumped, dict)
+        assert dumped["audit_type"] == "pr_review"
+        assert dumped["pr"]["author"] == "nelson"
+        assert len(dumped["findings"]) == 1
+        assert dumped["findings"][0]["id"] == "F-001"
+
+    def test_round_trip_revalidation(self) -> None:
+        review = GrippyReview(**_minimal_review())
+        dumped = review.model_dump()
+        restored = GrippyReview.model_validate(dumped)
+
+        assert restored.audit_type == review.audit_type
+        assert restored.pr.title == review.pr.title
+        assert restored.score.overall == review.score.overall
+        assert restored.verdict.status == review.verdict.status
+        assert restored.personality.tone_register == review.personality.tone_register
+
+    def test_version_default(self) -> None:
+        review = GrippyReview(**_minimal_review())
+        assert review.version == "1.0"
+
+    def test_score_overall_boundary(self) -> None:
+        """Score.overall must be 0-100."""
+        data = _minimal_review()
+        data["score"]["overall"] = 101
+        with pytest.raises(ValidationError, match="overall"):
+            GrippyReview(**data)
+
+    @pytest.mark.parametrize(
+        "field", ["security", "logic", "governance", "reliability", "observability"]
+    )
+    def test_score_breakdown_rejects_negative(self, field: str) -> None:
+        """ScoreBreakdown fields must be 0-100, not deduction-style negatives."""
+        data = _minimal_review()
+        data["score"]["breakdown"][field] = -17
+        with pytest.raises(ValidationError):
+            GrippyReview(**data)
+
+    @pytest.mark.parametrize(
+        "field", ["security", "logic", "governance", "reliability", "observability"]
+    )
+    def test_score_breakdown_rejects_over_100(self, field: str) -> None:
+        data = _minimal_review()
+        data["score"]["breakdown"][field] = 101
+        with pytest.raises(ValidationError):
+            GrippyReview(**data)
+
+    def test_escalation_included(self) -> None:
+        data = _minimal_review()
+        data["escalations"] = [
+            {
+                "id": "E-001",
+                "severity": "CRITICAL",
+                "category": "security",
+                "summary": "Credential leak in env file",
+                "details": "API key committed to repo.",
+                "recommended_target": "security-team",
+                "blocking": True,
+            }
+        ]
+        review = GrippyReview(**data)
+        assert len(review.escalations) == 1
+        assert review.escalations[0].blocking is True
+
+
+# --- Fingerprint tests ---
+
+
+class TestFindingFingerprint:
+    """Finding.fingerprint is a deterministic hash for cross-round matching."""
+
+    def test_fingerprint_is_deterministic(self) -> None:
+        """Same file + category + title -> same fingerprint."""
+        f1 = Finding(
+            **_minimal_finding(
+                id="F-001",
+                file="src/auth.py",
+                category="security",
+                title="SQL injection risk",
+            )
+        )
+        f2 = Finding(
+            **_minimal_finding(
+                id="F-002",
+                severity="MEDIUM",
+                confidence=70,
+                file="src/auth.py",
+                category="security",
+                title="SQL injection risk",
+                description="different",
+            )
+        )
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_line_changes(self) -> None:
+        """Line numbers don't affect fingerprint."""
+        f1 = Finding(**_minimal_finding(line_start=10, line_end=20))
+        f2 = Finding(**_minimal_finding(line_start=100, line_end=110))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_differs_for_different_files(self) -> None:
+        """Different file -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(file="a.py"))
+        f2 = Finding(**_minimal_finding(file="b.py"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_differs_for_different_categories(self) -> None:
+        """Different category -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(category="security"))
+        f2 = Finding(**_minimal_finding(category="logic"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_differs_for_different_titles(self) -> None:
+        """Different title -> different fingerprint."""
+        f1 = Finding(**_minimal_finding(title="Title A"))
+        f2 = Finding(**_minimal_finding(title="Title B"))
+        assert f1.fingerprint != f2.fingerprint
+
+    def test_fingerprint_is_12_char_hex(self) -> None:
+        """Fingerprint is a 12-character hex string."""
+        f = Finding(**_minimal_finding())
+        assert len(f.fingerprint) == 12
+        assert all(c in "0123456789abcdef" for c in f.fingerprint)
+
+    def test_fingerprint_stable_across_whitespace(self) -> None:
+        """Trailing/leading whitespace in title doesn't change fingerprint."""
+        f1 = Finding(**_minimal_finding(title="SQL injection"))
+        f2 = Finding(**_minimal_finding(title="SQL injection "))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_case(self) -> None:
+        """Title case doesn't change fingerprint."""
+        f1 = Finding(**_minimal_finding(title="SQL Injection"))
+        f2 = Finding(**_minimal_finding(title="sql injection"))
+        assert f1.fingerprint == f2.fingerprint
+
+    def test_fingerprint_stable_across_category_enum(self) -> None:
+        """Uses category.value (string), not enum repr."""
+        f1 = Finding(**_minimal_finding(category="security"))
+        f2 = Finding(**_minimal_finding(category="security"))
+        # Both should use the string value "security" in the hash key
+        assert f1.fingerprint == f2.fingerprint
+        # And the key should use the value, not something like "FindingCategory.SECURITY"
+        import hashlib
+
+        expected_key = f"{f1.file.strip()}:{f1.category.value}:{f1.title.strip().lower()}"
+        expected_fp = hashlib.sha256(expected_key.encode()).hexdigest()[:12]
+        assert f1.fingerprint == expected_fp
+
+
+# --- Finding frozen model (Commit 2, Issue #7) ---
+
+
+class TestFindingFrozen:
+    """Finding model should be frozen to prevent accidental mutation."""
+
+    def test_finding_is_frozen(self) -> None:
+        """Assigning to a field on a frozen Finding raises ValidationError."""
+        f = Finding(**_minimal_finding())
+        with pytest.raises(ValidationError):
+            f.file = "other.py"  # type: ignore[misc]
+
+    def test_fingerprint_accessible_on_frozen_model(self) -> None:
+        """cached_property fingerprint works on a frozen Pydantic model."""
+        f = Finding(**_minimal_finding())
+        fp = f.fingerprint
+        assert len(fp) == 12
+        # Access again — should be cached
+        assert f.fingerprint == fp
