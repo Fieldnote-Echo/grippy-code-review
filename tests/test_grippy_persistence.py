@@ -211,6 +211,7 @@ class TestGrippyStoreInit:
             "status",
             "fingerprint",
             "created_at",
+            "updated_at",
         } <= columns
 
     def test_sqlite_schema_has_edges_table(self, store: GrippyStore) -> None:
@@ -441,6 +442,27 @@ class TestIdempotency:
         row = cur.fetchone()
         data = json.loads(row["data"])
         assert data["evidence"] == "new evidence"
+
+    def test_upsert_preserves_created_at(self, store: GrippyStore) -> None:
+        """Re-storing a review preserves the original created_at timestamp."""
+        review_v1 = _make_review(timestamp="2026-01-01T00:00:00Z")
+        store.store_review(review_v1)
+
+        cur = store._conn.cursor()
+        cur.execute("SELECT created_at FROM nodes WHERE type = ?", (NodeType.FINDING.value,))
+        original_created = cur.fetchone()["created_at"]
+
+        # Re-store with a later timestamp (same fingerprint = same node ID)
+        review_v2 = _make_review(timestamp="2026-02-01T00:00:00Z")
+        store.store_review(review_v2)
+
+        cur.execute(
+            "SELECT created_at, updated_at FROM nodes WHERE type = ?",
+            (NodeType.FINDING.value,),
+        )
+        row = cur.fetchone()
+        assert row["created_at"] == original_created
+        assert row["updated_at"] == "2026-02-01T00:00:00Z"
 
     def test_upsert_preserves_resolved_status(self, store: GrippyStore) -> None:
         """UPSERT preserves 'resolved' status — doesn't revert to 'open'."""

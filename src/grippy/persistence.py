@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     session_id  TEXT,
     status      TEXT,
     fingerprint TEXT,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT
 )
 """
 
@@ -139,6 +140,7 @@ class GrippyStore:
         self._migrate_v1_schema(cur)
         cur.execute(_NODES_TABLE_SQL)
         cur.execute(_EDGES_TABLE_SQL)
+        self._add_updated_at_column(cur)
         for idx_sql in _INDEXES_SQL:
             cur.execute(idx_sql)
         self._conn.commit()
@@ -162,6 +164,15 @@ class GrippyStore:
                 cur.execute("DROP TABLE IF EXISTS edges")
                 cur.execute("DROP TABLE IF EXISTS node_meta")
                 cur.execute("DROP TABLE IF EXISTS nodes")
+
+    @staticmethod
+    def _add_updated_at_column(cur: sqlite3.Cursor) -> None:
+        """Add updated_at column if missing (backfill from created_at)."""
+        cur.execute("PRAGMA table_info(nodes)")
+        columns = {row[1] for row in cur.fetchall()}
+        if "updated_at" not in columns:
+            cur.execute("ALTER TABLE nodes ADD COLUMN updated_at TEXT")
+            cur.execute("UPDATE nodes SET updated_at = created_at WHERE updated_at IS NULL")
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
         """Open existing nodes table if present."""
@@ -238,6 +249,7 @@ class GrippyStore:
                     "status": status,
                     "fingerprint": fingerprint,
                     "created_at": review.timestamp,
+                    "updated_at": review.timestamp,
                 }
             )
             # Build embedding text
@@ -342,15 +354,17 @@ class GrippyStore:
         try:
             for node in nodes:
                 cur.execute(
-                    """INSERT INTO nodes (id, type, label, data, session_id, status, fingerprint, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """INSERT INTO nodes
+                    (id, type, label, data, session_id, status, fingerprint, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         label = excluded.label,
                         data = excluded.data,
                         session_id = excluded.session_id,
                         status = COALESCE(nodes.status, excluded.status),
                         fingerprint = excluded.fingerprint,
-                        created_at = excluded.created_at""",
+                        created_at = nodes.created_at,
+                        updated_at = excluded.updated_at""",
                     (
                         node["id"],
                         node["type"],
@@ -360,6 +374,7 @@ class GrippyStore:
                         node["status"],
                         node["fingerprint"],
                         node["created_at"],
+                        node["updated_at"],
                     ),
                 )
             for source, target, relationship, properties in edges:
