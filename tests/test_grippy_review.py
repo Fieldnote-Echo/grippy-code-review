@@ -300,11 +300,11 @@ class TestFailureComment:
         assert "Actions log" in body
 
 
-# --- T1: main() uses run_review + GrippyStore ---
+# --- main() wiring ---
 
 
 class TestMainWiringNewAPI:
-    """Verify main() calls run_review and passes review directly to GrippyStore."""
+    """Verify main() calls run_review and posts review."""
 
     def _make_event_file(self, tmp_path: Path) -> Path:
         event = {
@@ -323,7 +323,6 @@ class TestMainWiringNewAPI:
         return event_path
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -332,7 +331,6 @@ class TestMainWiringNewAPI:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -353,71 +351,6 @@ class TestMainWiringNewAPI:
 
         mock_run_review.assert_called_once()
         mock_create.return_value.run.assert_not_called()
-
-    @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
-    @patch("grippy.review.run_review")
-    @patch("grippy.review.create_reviewer")
-    @patch("grippy.review.fetch_pr_diff")
-    def test_main_persists_review_directly(
-        self,
-        mock_fetch: MagicMock,
-        mock_create: MagicMock,
-        mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
-        mock_post_review: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """main() should persist the review directly via GrippyStore (no graph intermediary)."""
-        event_path = self._make_event_file(tmp_path)
-        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
-        review = _make_review()
-        mock_run_review.return_value = review
-
-        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
-        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
-
-        from grippy.review import main
-
-        main()
-
-        mock_store_cls.assert_called_once()
-        mock_store_cls.return_value.store_review.assert_called_once_with(review, session_id="pr-1")
-
-    @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
-    @patch("grippy.review.run_review")
-    @patch("grippy.review.create_reviewer")
-    @patch("grippy.review.fetch_pr_diff")
-    def test_persistence_failure_non_fatal(
-        self,
-        mock_fetch: MagicMock,
-        mock_create: MagicMock,
-        mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
-        mock_post_review: MagicMock,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Persistence failure should not prevent the review from posting."""
-        event_path = self._make_event_file(tmp_path)
-        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
-        mock_run_review.return_value = _make_review()
-        mock_store_cls.return_value.store_review.side_effect = RuntimeError("LanceDB exploded")
-
-        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
-        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
-
-        from grippy.review import main
-
-        # Should NOT raise — persistence failure is non-fatal
-        main()
-
-        # post_review should still be called
-        mock_post_review.assert_called_once()
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.run_review")
@@ -467,9 +400,8 @@ class TestTruncateDiff:
 
     def test_large_diff_truncated(self) -> None:
         """Diffs over MAX_DIFF_CHARS are truncated with a warning."""
-        # Build a diff with many file blocks that exceed the cap
         block = "diff --git a/f.py b/f.py\n" + ("+" * 5000) + "\n"
-        diff = block * 100  # 100 files x ~5K each = ~500K chars
+        diff = block * 100
         assert len(diff) > MAX_DIFF_CHARS, "Test diff must exceed cap"
         result = truncate_diff(diff)
         assert len(result) < len(diff)
@@ -477,17 +409,15 @@ class TestTruncateDiff:
 
     def test_truncated_diff_ends_at_file_boundary(self) -> None:
         """Truncation happens at a file boundary, not mid-hunk."""
-        # Build a diff with multiple files, total > cap
         file_block = (
             "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
             + "@@ -1,10 +1,10 @@\n"
             + ("-old line\n+new line\n" * 100)
         )
-        diff = file_block * 50  # Should exceed cap
+        diff = file_block * 50
         if len(diff) <= MAX_DIFF_CHARS:
             pytest.skip("Test diff not large enough to trigger truncation")
         result = truncate_diff(diff)
-        # Should not cut in the middle of a hunk
         assert result.rstrip().endswith("(truncated)") or "truncated" in result
 
     def test_truncation_preserves_complete_files(self) -> None:
@@ -498,7 +428,6 @@ class TestTruncateDiff:
         )
         diff = small_file + big_file
         result = truncate_diff(diff)
-        # Should contain the small file completely
         assert "small.py" in result
 
 
@@ -590,21 +519,19 @@ class TestMainOrchestration:
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
-    def test_happy_path_posts_review_and_persists(
+    def test_happy_path_posts_review(
         self,
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Happy path: review succeeds, post_review called, review persisted."""
+        """Happy path: review succeeds, post_review called."""
         event_path = self._make_event_file(tmp_path)
         self._setup_env(monkeypatch, event_path, tmp_path)
 
@@ -617,10 +544,8 @@ class TestMainOrchestration:
         main()
 
         mock_post_review.assert_called_once()
-        mock_store_cls.return_value.store_review.assert_called_once_with(review, session_id="pr-7")
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -629,7 +554,6 @@ class TestMainOrchestration:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -647,13 +571,7 @@ class TestMainOrchestration:
 
         main()
 
-        # The structured field was overridden (not just the comment text)
         assert review.model == "gpt-5.2"
-
-        # The overridden value reached store_review
-        store_call = mock_store_cls.return_value.store_review
-        store_call.assert_called_once()
-        assert store_call.call_args[0][0].model == "gpt-5.2"
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.run_review")
@@ -681,8 +599,6 @@ class TestMainOrchestration:
             main()
 
         assert exc_info.value.code == 1
-
-        # Error comment was posted
         mock_post.assert_called_once()
         posted_body = mock_post.call_args[0][3]
         assert "ERROR" in posted_body
@@ -717,14 +633,11 @@ class TestMainOrchestration:
             main()
 
         assert exc_info.value.code == 1
-
-        # Parse error comment was posted
         mock_post.assert_called_once()
         posted_body = mock_post.call_args[0][3]
         assert "PARSE ERROR" in posted_body
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -733,7 +646,6 @@ class TestMainOrchestration:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -764,7 +676,6 @@ class TestMainOrchestration:
         assert mock_post_review.call_args[1]["verdict"] == "FAIL"
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -773,7 +684,6 @@ class TestMainOrchestration:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -802,7 +712,6 @@ class TestMainOrchestration:
         assert call_kwargs["transport"] is None
 
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -811,7 +720,6 @@ class TestMainOrchestration:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -834,7 +742,7 @@ class TestMainOrchestration:
 
 
 class TestMainReviewIntegration:
-    """main() uses new post_review and create_embedder."""
+    """main() uses new post_review."""
 
     @patch("grippy.review.post_review")
     @patch("grippy.review.run_review")
@@ -851,7 +759,7 @@ class TestMainReviewIntegration:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """main() should call post_review instead of post_comment."""
+        """main() should call post_review."""
         event_file = tmp_path / "event.json"
         event_file.write_text(
             '{"pull_request": {"number": 1, "title": "test", "user": {"login": "dev"}, '
@@ -889,7 +797,7 @@ class TestMainReviewIntegration:
         mock_post.assert_called_once()
 
 
-# --- post_review failure handling (Commit 5, Issue #6) ---
+# --- post_review failure handling ---
 
 
 class TestMainPostReviewFailure:
@@ -919,7 +827,6 @@ class TestMainPostReviewFailure:
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -928,7 +835,6 @@ class TestMainPostReviewFailure:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         mock_post_comment: MagicMock,
         tmp_path: Path,
@@ -952,7 +858,6 @@ class TestMainPostReviewFailure:
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -961,7 +866,6 @@ class TestMainPostReviewFailure:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         mock_post_comment: MagicMock,
         tmp_path: Path,
@@ -992,7 +896,6 @@ class TestMainPostReviewFailure:
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.post_review")
-    @patch("grippy.review.GrippyStore")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")
     @patch("grippy.review.fetch_pr_diff")
@@ -1001,7 +904,6 @@ class TestMainPostReviewFailure:
         mock_fetch: MagicMock,
         mock_create: MagicMock,
         mock_run_review: MagicMock,
-        mock_store_cls: MagicMock,
         mock_post_review: MagicMock,
         mock_post_comment: MagicMock,
         tmp_path: Path,
@@ -1065,7 +967,6 @@ class TestTransportErrorUX:
         with pytest.raises(SystemExit):
             main()
 
-        # Should have posted an error comment
         mock_post_comment.assert_called_once()
-        body = mock_post_comment.call_args[0][3]  # 4th positional arg is body
+        body = mock_post_comment.call_args[0][3]
         assert "CONFIG ERROR" in body

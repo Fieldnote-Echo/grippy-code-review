@@ -617,10 +617,8 @@ class TestMainWiring:
     @patch("grippy.review.run_review")
     @patch("grippy.review.fetch_pr_diff")
     @patch("grippy.review.create_embedder")
-    @patch("grippy.review.GrippyStore")
     def test_codebase_index_wired_in_main(
         self,
-        mock_store_cls: MagicMock,
         mock_create_embedder: MagicMock,
         mock_fetch_diff: MagicMock,
         mock_run_review: MagicMock,
@@ -708,9 +706,6 @@ class TestMainWiring:
         mock_fetch_diff.return_value = "diff --git a/test.py b/test.py\n+hello\n"
         mock_run_review.return_value = review
         mock_post_review.return_value = None
-        mock_store = MagicMock()
-        mock_store.get_prior_findings.return_value = []
-        mock_store_cls.return_value = mock_store
         mock_create_embedder.return_value = MagicMock()
 
         env = {

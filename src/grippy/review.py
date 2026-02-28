@@ -29,8 +29,6 @@ from typing import Any
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
-from grippy.graph import FindingStatus
-from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 
 # Max diff size sent to the LLM — ~500K chars ≈ 125K tokens
@@ -348,43 +346,15 @@ def main() -> None:
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
-    # 6. Get prior findings, THEN persist review (non-fatal)
-    session_id = f"pr-{pr_event['pr_number']}"
-    prior_findings: list[dict[str, Any]] = []
-    store: GrippyStore | None = None
-    print("Persisting review graph...")
-    try:
-        embedder = create_embedder(
-            transport=transport or "local",
-            model=embedding_model,
-            base_url=base_url,
-        )
-        store = GrippyStore(
-            graph_db_path=data_dir / "grippy-graph.db",
-            lance_dir=data_dir / "lance",
-            embedder=embedder,
-        )
-        # Query prior findings BEFORE storing current round
-        try:
-            prior_findings = store.get_prior_findings(session_id=session_id)
-        except Exception:
-            prior_findings = []
-        store.store_review(review, session_id=session_id)
-        print(f"  Review persisted ({len(review.findings)} findings)")
-    except Exception as exc:
-        print(f"::warning::Graph persistence failed: {exc}")
-
-    # 7. Post review with inline comments + summary dashboard
+    # 6. Post review — GitHub owns finding lifecycle
     head_sha = pr_event.get("head_sha", "")
     print("Posting review...")
-    resolution = None
     try:
-        resolution = post_review(
+        post_review(
             token=token,
             repo=pr_event["repo"],
             pr_number=pr_event["pr_number"],
             findings=review.findings,
-            prior_findings=prior_findings,
             head_sha=head_sha,
             diff=diff,
             score=review.score.overall,
@@ -404,16 +374,7 @@ def main() -> None:
         except Exception:
             pass  # Don't mask the original error
 
-    # 8. Update resolved finding status in graph DB (non-fatal)
-    if resolution is not None and resolution.resolved and store is not None:
-        try:
-            for resolved in resolution.resolved:
-                store.update_finding_status(resolved["node_id"], FindingStatus.RESOLVED)
-            print(f"  Marked {len(resolution.resolved)} findings as resolved")
-        except Exception as exc:
-            print(f"::warning::Failed to update finding status: {exc}")
-
-    # 9. Set outputs for GitHub Actions
+    # 7. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
         with open(github_output, "a") as f:

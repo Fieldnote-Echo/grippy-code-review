@@ -285,80 +285,7 @@ class TestGrippyReviewRoundTrip:
         assert review.escalations[0].blocking is True
 
 
-# --- Fingerprint tests ---
-
-
-class TestFindingFingerprint:
-    """Finding.fingerprint is a deterministic hash for cross-round matching."""
-
-    def test_fingerprint_is_deterministic(self) -> None:
-        """Same file + category -> same fingerprint."""
-        f1 = Finding(
-            **_minimal_finding(
-                id="F-001",
-                file="src/auth.py",
-                category="security",
-                title="SQL injection risk",
-            )
-        )
-        f2 = Finding(
-            **_minimal_finding(
-                id="F-002",
-                severity="MEDIUM",
-                confidence=70,
-                file="src/auth.py",
-                category="security",
-                title="SQL injection risk",
-                description="different",
-            )
-        )
-        assert f1.fingerprint == f2.fingerprint
-
-    def test_fingerprint_stable_across_line_changes(self) -> None:
-        """Line numbers don't affect fingerprint."""
-        f1 = Finding(**_minimal_finding(line_start=10, line_end=20))
-        f2 = Finding(**_minimal_finding(line_start=100, line_end=110))
-        assert f1.fingerprint == f2.fingerprint
-
-    def test_fingerprint_differs_for_different_files(self) -> None:
-        """Different file -> different fingerprint."""
-        f1 = Finding(**_minimal_finding(file="a.py"))
-        f2 = Finding(**_minimal_finding(file="b.py"))
-        assert f1.fingerprint != f2.fingerprint
-
-    def test_fingerprint_differs_for_different_categories(self) -> None:
-        """Different category -> different fingerprint."""
-        f1 = Finding(**_minimal_finding(category="security"))
-        f2 = Finding(**_minimal_finding(category="logic"))
-        assert f1.fingerprint != f2.fingerprint
-
-    def test_fingerprint_stable_across_title_changes(self) -> None:
-        """Different title -> same fingerprint (title not in hash)."""
-        f1 = Finding(**_minimal_finding(title="Title A"))
-        f2 = Finding(**_minimal_finding(title="Title B"))
-        assert f1.fingerprint == f2.fingerprint
-
-    def test_fingerprint_is_12_char_hex(self) -> None:
-        """Fingerprint is a 12-character hex string."""
-        f = Finding(**_minimal_finding())
-        assert len(f.fingerprint) == 12
-        assert all(c in "0123456789abcdef" for c in f.fingerprint)
-
-    def test_fingerprint_stable_across_category_enum(self) -> None:
-        """Uses category.value (string), not enum repr."""
-        f1 = Finding(**_minimal_finding(category="security"))
-        f2 = Finding(**_minimal_finding(category="security"))
-        # Both should use the string value "security" in the hash key
-        assert f1.fingerprint == f2.fingerprint
-        # And the key should use the value, not something like "FindingCategory.SECURITY"
-        import hashlib
-
-        expected_key = f"{f1.file.strip()}:{f1.category.value}"
-        expected_fp = hashlib.sha256(expected_key.encode()).hexdigest()[:12]
-        assert f1.fingerprint == expected_fp
-
-
-# --- Finding frozen model (Commit 2, Issue #7) ---
+# --- Finding frozen model ---
 
 
 class TestFindingFrozen:
@@ -369,11 +296,3 @@ class TestFindingFrozen:
         f = Finding(**_minimal_finding())
         with pytest.raises(ValidationError):
             f.file = "other.py"  # type: ignore[misc]
-
-    def test_fingerprint_accessible_on_frozen_model(self) -> None:
-        """cached_property fingerprint works on a frozen Pydantic model."""
-        f = Finding(**_minimal_finding())
-        fp = f.fingerprint
-        assert len(fp) == 12
-        # Access again — should be cached
-        assert f.fingerprint == fp
