@@ -266,7 +266,7 @@ class GrippyStore:
             embed_texts.append(text)
 
         # Review node
-        review_nid = _record_id(NodeType.REVIEW, review.model, review.timestamp)
+        review_nid = _record_id(NodeType.REVIEW, review.model, review.timestamp, session_id)
         _add_node(
             review_nid,
             NodeType.REVIEW,

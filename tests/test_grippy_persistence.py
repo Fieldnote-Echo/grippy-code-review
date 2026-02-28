@@ -811,3 +811,20 @@ class TestBatchEmbedding:
         for node in nodes:
             assert "vector" in node
             assert len(node["vector"]) == EMBED_DIM
+
+
+# --- Review node ID hardening ---
+
+
+class TestReviewNodeId:
+    def test_different_sessions_different_review_ids(self, store: GrippyStore) -> None:
+        """Same model+timestamp but different sessions produce different review node IDs."""
+        review = _make_review(timestamp="2026-02-26T12:00:00Z")
+        store.store_review(review, session_id="pr-1")
+        store.store_review(review, session_id="pr-2")
+
+        cur = store._conn.cursor()
+        cur.execute("SELECT id FROM nodes WHERE type = ?", (NodeType.REVIEW.value,))
+        ids = [row["id"] for row in cur.fetchall()]
+        assert len(ids) == 2
+        assert ids[0] != ids[1]
