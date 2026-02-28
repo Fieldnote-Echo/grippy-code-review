@@ -360,6 +360,10 @@ def _make_grep_code(repo_root: Path) -> Any:
             return f"Invalid regex: {e}"
 
         try:
+            # Use -r (not -R) to prevent following symlinks on GNU grep.
+            # On BSD grep, -r follows symlinks; -S is needed to prevent it,
+            # but -S is not recognised by GNU grep.  Since CI targets Linux
+            # (GNU grep), -r alone is sufficient.
             cmd = [
                 "grep",
                 "-rn",
