@@ -229,6 +229,7 @@ def main() -> None:
             tool_call_limit=10 if codebase_tools else None,
         )
     except ValueError as exc:
+        print(f"::error::Invalid configuration: {exc}")
         error_body = (
             "## \u274c Grippy Review \u2014 CONFIG ERROR\n\n"
             "Review failed. Check the "
@@ -306,10 +307,11 @@ def main() -> None:
         print(f"::error::Grippy review timed out: {exc}")
         try:
             failure_body = (
-                f"## \u274c Grippy Review \u2014 TIMEOUT\n\n"
-                f"Review timed out after {timeout_seconds}s.\n\n"
-                f"Model: {model_id} at {base_url}\n\n"
-                f"<!-- grippy-error -->"
+                "## \u274c Grippy Review \u2014 TIMEOUT\n\n"
+                "Review failed. Check the "
+                "[Actions log](https://github.com/"
+                f"{pr_event['repo']}/actions) for details.\n\n"
+                "<!-- grippy-error -->"
             )
             post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
