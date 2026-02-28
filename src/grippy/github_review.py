@@ -1,10 +1,13 @@
-"""GitHub PR Review API integration — inline comments, resolution, summaries."""
+"""GitHub PR Review API integration — inline comments, resolution, summaries.
+
+Finding lifecycle is owned by GitHub: fetch existing comments, compare,
+post only genuinely new findings, resolve threads for absent findings.
+"""
 
 from __future__ import annotations
 
 import re
 import subprocess
-from dataclasses import dataclass, field
 from typing import Any
 
 from github import Github, GithubException
@@ -124,6 +127,14 @@ _SEVERITY_EMOJI = {
     "LOW": "\U0001f535",
 }
 
+# Marker format: <!-- grippy:file:category:line -->
+_GRIPPY_MARKER_RE = re.compile(r"<!-- grippy:(?P<file>[^:]+):(?P<category>[^:]+):(?P<line>\d+) -->")
+
+
+def _finding_marker(finding: Finding) -> str:
+    """Build an HTML comment marker for dedup — keyed on file, category, line."""
+    return f"<!-- grippy:{finding.file}:{finding.category.value}:{finding.line_start} -->"
+
 
 def build_review_comment(finding: Finding) -> dict[str, str | int]:
     """Build a PyGithub-compatible review comment dict for a finding.
@@ -145,7 +156,7 @@ def build_review_comment(finding: Finding) -> dict[str, str | int]:
         "",
         f"*\u2014 {finding.grippy_note}*",
         "",
-        f"<!-- grippy-finding-{finding.fingerprint} -->",
+        _finding_marker(finding),
     ]
     return {
         "path": finding.file,
@@ -153,6 +164,39 @@ def build_review_comment(finding: Finding) -> dict[str, str | int]:
         "line": finding.line_start,
         "side": "RIGHT",
     }
+
+
+# --- GitHub comment fetching ---
+
+
+def _parse_marker(body: str) -> tuple[str, str, int] | None:
+    """Extract (file, category, line) from a grippy marker in comment body."""
+    match = _GRIPPY_MARKER_RE.search(body)
+    if match:
+        return (match.group("file"), match.group("category"), int(match.group("line")))
+    return None
+
+
+def fetch_grippy_comments(
+    pr: Any,
+) -> dict[tuple[str, str, int], Any]:
+    """Fetch existing Grippy review comments from a PR.
+
+    Scans all review comments for grippy markers and returns them keyed
+    by (file, category, line) for O(1) dedup lookups.
+
+    Args:
+        pr: PyGithub PullRequest object.
+
+    Returns:
+        Dict mapping (file, category, line) to the comment object.
+    """
+    result: dict[tuple[str, str, int], Any] = {}
+    for comment in pr.get_review_comments():
+        key = _parse_marker(comment.body)
+        if key is not None:
+            result[key] = comment
+    return result
 
 
 # --- Summary dashboard ---
@@ -164,11 +208,11 @@ def format_summary_comment(
     verdict: str,
     finding_count: int,
     new_count: int,
-    persists_count: int,
     resolved_count: int,
     off_diff_findings: list[Finding],
     head_sha: str,
     pr_number: int,
+    diff_truncated: bool = False,
 ) -> str:
     """Format the compact summary dashboard as an issue comment.
 
@@ -176,12 +220,12 @@ def format_summary_comment(
         score: Overall review score (0-100).
         verdict: PASS, FAIL, or PROVISIONAL.
         finding_count: Total findings this round.
-        new_count: Findings not seen in prior round.
-        persists_count: Findings that persist from prior round.
+        new_count: Genuinely new findings posted this round.
         resolved_count: Prior findings resolved this round.
         off_diff_findings: Findings outside diff hunks (shown inline here).
         head_sha: Commit SHA for this review.
         pr_number: PR number for marker scoping.
+        diff_truncated: Whether the diff was truncated to fit context limits.
 
     Returns:
         Formatted markdown comment body.
@@ -198,13 +242,18 @@ def format_summary_comment(
     lines.append(f"**Score: {score}/100** | **Findings: {finding_count}**")
     lines.append("")
 
+    if diff_truncated:
+        lines.append(
+            "> \u26a0\ufe0f **Notice:** Diff was truncated to fit context limits."
+            " Some files may not have been reviewed."
+        )
+        lines.append("")
+
     # Delta section
-    if new_count or persists_count or resolved_count:
+    if new_count or resolved_count:
         parts = []
         if new_count:
             parts.append(f"{new_count} new")
-        if persists_count:
-            parts.append(f"{persists_count} persists")
         if resolved_count:
             parts.append(f"\u2705 {resolved_count} resolved")
         lines.append(f"**Delta:** {' \u00b7 '.join(parts)}")
@@ -235,68 +284,6 @@ def format_summary_comment(
     return "\n".join(lines)
 
 
-# --- Finding resolution ---
-
-
-@dataclass
-class PersistingFinding:
-    """A finding that persists from a prior round."""
-
-    finding: Finding
-    prior_node_id: str
-
-
-@dataclass
-class ResolutionResult:
-    """Result of resolving current findings against prior round."""
-
-    new: list[Finding] = field(default_factory=list)
-    persisting: list[PersistingFinding] = field(default_factory=list)
-    resolved: list[dict[str, Any]] = field(default_factory=list)
-
-
-def resolve_findings_against_prior(
-    current: list[Finding],
-    prior: list[dict[str, Any]],
-) -> ResolutionResult:
-    """Match current findings against prior round using fingerprints.
-
-    Resolution rules:
-    - Exact fingerprint match -> PERSISTS
-    - No match in current for a prior finding -> RESOLVED
-    - No match in prior for a current finding -> NEW
-
-    Args:
-        current: Findings from the current review round.
-        prior: Prior findings as dicts with 'fingerprint', 'title', 'node_id'.
-
-    Returns:
-        ResolutionResult with new, persisting, and resolved findings.
-    """
-    result = ResolutionResult()
-    prior_by_fp = {p["fingerprint"]: p for p in prior}
-    matched_prior_fps: set[str] = set()
-
-    for finding in current:
-        fp = finding.fingerprint
-        if fp in prior_by_fp:
-            result.persisting.append(
-                PersistingFinding(
-                    finding=finding,
-                    prior_node_id=prior_by_fp[fp]["node_id"],
-                )
-            )
-            matched_prior_fps.add(fp)
-        else:
-            result.new.append(finding)
-
-    for prior_finding in prior:
-        if prior_finding["fingerprint"] not in matched_prior_fps:
-            result.resolved.append(prior_finding)
-
-    return result
-
-
 # --- Post review ---
 
 _REVIEW_BATCH_SIZE = 25
@@ -308,34 +295,49 @@ def post_review(
     repo: str,
     pr_number: int,
     findings: list[Finding],
-    prior_findings: list[dict[str, Any]],
     head_sha: str,
     diff: str,
     score: int,
     verdict: str,
-) -> ResolutionResult:
+    diff_truncated: bool = False,
+) -> None:
     """Post Grippy review as inline comments + summary dashboard.
+
+    GitHub owns finding lifecycle:
+    1. Fetch existing grippy comments from this PR
+    2. Compare new findings against existing — skip matches
+    3. Post only genuinely new findings as inline comments
+    4. Resolve threads for findings no longer present
+    5. Post/update summary with delta counts
 
     Args:
         token: GitHub API token.
         repo: Repository full name (owner/repo).
         pr_number: Pull request number.
         findings: Current round's findings.
-        prior_findings: Prior round's findings (from GrippyStore).
         head_sha: Current commit SHA.
         diff: Full PR diff text.
         score: Overall review score.
         verdict: PASS, FAIL, or PROVISIONAL.
-
-    Returns:
-        ResolutionResult for callers to update finding status in the store.
+        diff_truncated: Whether the diff was truncated to fit context limits.
     """
     gh = Github(token)
     repository = gh.get_repo(repo)
     pr = repository.get_pull(pr_number)
 
-    # Resolve findings against prior round
-    resolution = resolve_findings_against_prior(findings, prior_findings)
+    # 1. Fetch existing grippy comments
+    existing = fetch_grippy_comments(pr)
+
+    # 2. Classify: which current findings already have comments?
+    new_findings: list[Finding] = []
+    for finding in findings:
+        key = (finding.file, finding.category.value, finding.line_start)
+        if key not in existing:
+            new_findings.append(finding)
+
+    # 3. Identify resolved: existing comments not in current findings
+    current_keys = {(f.file, f.category.value, f.line_start) for f in findings}
+    resolved_comments = [comment for key, comment in existing.items() if key not in current_keys]
 
     # Detect fork PR — GITHUB_TOKEN is read-only for forks
     is_fork = (
@@ -344,16 +346,16 @@ def post_review(
         and pr.head.repo.full_name != pr.base.repo.full_name
     )
 
-    # Parse diff and classify
+    # Parse diff and classify new findings
     diff_lines = parse_diff_lines(diff)
-    inline, off_diff = classify_findings(findings, diff_lines)
+    inline, off_diff = classify_findings(new_findings, diff_lines)
 
     # For fork PRs, skip inline comments — put everything in summary
     if is_fork:
-        off_diff = findings
+        off_diff = new_findings
         inline = []
 
-    # Post inline review comments (batched, with 422 fallback)
+    # 4. Post inline review comments (batched, with 422 fallback)
     failed_findings: list[Finding] = []
     if inline:
         comments = [build_review_comment(f) for f in inline]
@@ -373,17 +375,27 @@ def post_review(
     if failed_findings:
         off_diff.extend(failed_findings)
 
-    # Build summary comment
+    # 5. Resolve threads for findings no longer present (non-fatal)
+    actual_resolved = 0
+    if resolved_comments:
+        try:
+            thread_ids = [c.node_id for c in resolved_comments]
+            actual_resolved = resolve_threads(repo=repo, pr_number=pr_number, thread_ids=thread_ids)
+            print(f"  Resolved {actual_resolved}/{len(thread_ids)} threads")
+        except Exception as exc:
+            print(f"::warning::Thread resolution failed: {exc}")
+
+    # 6. Build summary comment
     summary = format_summary_comment(
         score=score,
         verdict=verdict,
         finding_count=len(findings),
-        new_count=len(resolution.new),
-        persists_count=len(resolution.persisting),
-        resolved_count=len(resolution.resolved),
+        new_count=len(new_findings),
+        resolved_count=actual_resolved,
         off_diff_findings=off_diff,
         head_sha=head_sha,
         pr_number=pr_number,
+        diff_truncated=diff_truncated,
     )
 
     # Upsert: edit existing summary or create new
@@ -391,10 +403,9 @@ def post_review(
     for comment in pr.get_issue_comments():
         if marker in comment.body:
             comment.edit(summary)
-            return resolution
+            return
 
     pr.create_issue_comment(summary)
-    return resolution
 
 
 # --- Thread resolution ---

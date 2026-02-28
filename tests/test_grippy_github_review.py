@@ -218,12 +218,12 @@ class TestBuildReviewComment:
         assert "CRITICAL" in comment["body"]
         assert "Buffer overflow" in comment["body"]
 
-    def test_comment_body_contains_fingerprint_marker(self) -> None:
+    def test_comment_body_contains_grippy_marker(self) -> None:
         from grippy.github_review import build_review_comment
 
-        finding = _make_finding()
+        finding = _make_finding(file="src/app.py", category="security", line_start=10)
         comment = build_review_comment(finding)
-        assert f"<!-- grippy-finding-{finding.fingerprint} -->" in comment["body"]
+        assert "<!-- grippy:src/app.py:security:10 -->" in comment["body"]
 
     def test_comment_side_is_right(self) -> None:
         from grippy.github_review import build_review_comment
@@ -247,7 +247,6 @@ class TestFormatSummary:
             verdict="PASS",
             finding_count=3,
             new_count=2,
-            persists_count=1,
             resolved_count=0,
             off_diff_findings=[],
             head_sha="abc123",
@@ -264,14 +263,12 @@ class TestFormatSummary:
             verdict="PASS",
             finding_count=4,
             new_count=2,
-            persists_count=1,
             resolved_count=3,
             off_diff_findings=[],
             head_sha="abc123",
             pr_number=6,
         )
         assert "2 new" in result
-        assert "1 persists" in result
         assert "3 resolved" in result
 
     def test_contains_summary_marker(self) -> None:
@@ -282,7 +279,6 @@ class TestFormatSummary:
             verdict="PASS",
             finding_count=0,
             new_count=0,
-            persists_count=0,
             resolved_count=0,
             off_diff_findings=[],
             head_sha="abc",
@@ -299,7 +295,6 @@ class TestFormatSummary:
             verdict="PASS",
             finding_count=1,
             new_count=1,
-            persists_count=0,
             resolved_count=0,
             off_diff_findings=off_diff,
             head_sha="abc",
@@ -310,59 +305,63 @@ class TestFormatSummary:
         assert "Test finding" in result
 
 
-# --- resolve_findings_against_prior ---
+# --- fetch_grippy_comments ---
 
 
-class TestResolveFindingsLogic:
-    """resolve_findings_against_prior matches findings across rounds."""
+class TestFetchGrippyComments:
+    """fetch_grippy_comments scans PR review comments for grippy markers."""
 
-    def test_exact_fingerprint_match_is_persists(self) -> None:
-        from grippy.github_review import resolve_findings_against_prior
+    def test_parses_grippy_markers(self) -> None:
+        from grippy.github_review import fetch_grippy_comments
 
-        f = _make_finding(file="src/auth.py", title="SQL injection", category="security")
-        prior = [{"fingerprint": f.fingerprint, "title": "SQL injection", "node_id": "F:abc"}]
-        result = resolve_findings_against_prior([f], prior)
-        assert len(result.persisting) == 1
-        assert result.persisting[0].finding.title == "SQL injection"
-        assert result.persisting[0].prior_node_id == "F:abc"
+        comment = MagicMock()
+        comment.body = "text\n<!-- grippy:src/app.py:security:10 -->"
+        comment.node_id = "PRRT_1"
 
-    def test_no_match_is_new(self) -> None:
-        from grippy.github_review import resolve_findings_against_prior
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [comment]
 
-        prior = [{"fingerprint": "xxx999yyy888", "title": "Old issue", "node_id": "F:old"}]
-        current = [_make_finding(title="Brand new issue")]
-        result = resolve_findings_against_prior(current, prior)
-        assert len(result.new) == 1
-        assert result.new[0].title == "Brand new issue"
+        result = fetch_grippy_comments(pr)
+        assert ("src/app.py", "security", 10) in result
 
-    def test_unmatched_prior_is_resolved(self) -> None:
-        from grippy.github_review import resolve_findings_against_prior
+    def test_ignores_non_grippy_comments(self) -> None:
+        from grippy.github_review import fetch_grippy_comments
 
-        prior = [{"fingerprint": "xxx999yyy888", "title": "Fixed issue", "node_id": "F:fixed"}]
-        current = [_make_finding(title="Different issue")]
-        result = resolve_findings_against_prior(current, prior)
-        assert len(result.resolved) == 1
-        assert result.resolved[0]["node_id"] == "F:fixed"
+        comment = MagicMock()
+        comment.body = "Just a regular comment."
 
-    def test_empty_prior_all_new(self) -> None:
-        from grippy.github_review import resolve_findings_against_prior
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [comment]
 
-        current = [_make_finding(), _make_finding(title="Second")]
-        result = resolve_findings_against_prior(current, [])
-        assert len(result.new) == 2
-        assert len(result.persisting) == 0
-        assert len(result.resolved) == 0
+        result = fetch_grippy_comments(pr)
+        assert len(result) == 0
 
-    def test_empty_current_all_resolved(self) -> None:
-        from grippy.github_review import resolve_findings_against_prior
+    def test_multiple_comments(self) -> None:
+        from grippy.github_review import fetch_grippy_comments
 
-        prior = [
-            {"fingerprint": "aaa", "title": "Issue 1", "node_id": "F:1"},
-            {"fingerprint": "bbb", "title": "Issue 2", "node_id": "F:2"},
-        ]
-        result = resolve_findings_against_prior([], prior)
-        assert len(result.new) == 0
-        assert len(result.resolved) == 2
+        c1 = MagicMock()
+        c1.body = "text\n<!-- grippy:a.py:security:10 -->"
+        c1.node_id = "PRRT_1"
+        c2 = MagicMock()
+        c2.body = "text\n<!-- grippy:b.py:logic:20 -->"
+        c2.node_id = "PRRT_2"
+
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [c1, c2]
+
+        result = fetch_grippy_comments(pr)
+        assert len(result) == 2
+        assert ("a.py", "security", 10) in result
+        assert ("b.py", "logic", 20) in result
+
+    def test_empty_comments(self) -> None:
+        from grippy.github_review import fetch_grippy_comments
+
+        pr = MagicMock()
+        pr.get_review_comments.return_value = []
+
+        result = fetch_grippy_comments(pr)
+        assert len(result) == 0
 
 
 # --- post_review ---
@@ -378,7 +377,7 @@ class TestPostReview:
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
         mock_pr.get_issue_comments.return_value = []
-        # Same repo — not a fork
+        mock_pr.get_review_comments.return_value = []  # no existing grippy comments
         mock_pr.head.repo.full_name = "org/repo"
         mock_pr.base.repo.full_name = "org/repo"
 
@@ -398,7 +397,6 @@ class TestPostReview:
             repo="org/repo",
             pr_number=1,
             findings=findings,
-            prior_findings=[],
             head_sha="abc123",
             diff=diff,
             score=80,
@@ -417,6 +415,7 @@ class TestPostReview:
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
         mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_pr.head.repo.full_name = "org/repo"
         mock_pr.base.repo.full_name = "org/repo"
 
@@ -432,7 +431,6 @@ class TestPostReview:
             repo="org/repo",
             pr_number=1,
             findings=findings,
-            prior_findings=[],
             head_sha="abc123",
             diff=diff,
             score=70,
@@ -450,6 +448,7 @@ class TestPostReview:
 
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_review_comments.return_value = []
 
         existing_comment = MagicMock()
         existing_comment.body = "old stuff\n<!-- grippy-summary-1 -->"
@@ -460,7 +459,6 @@ class TestPostReview:
             repo="org/repo",
             pr_number=1,
             findings=[],
-            prior_findings=[],
             head_sha="abc",
             diff="",
             score=90,
@@ -478,6 +476,7 @@ class TestPostReview:
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
         mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_pr.head.repo.full_name = "forker/repo"
         mock_pr.base.repo.full_name = "org/repo"
 
@@ -493,7 +492,6 @@ class TestPostReview:
             repo="org/repo",
             pr_number=1,
             findings=findings,
-            prior_findings=[],
             head_sha="abc",
             diff=diff,
             score=75,
@@ -502,6 +500,81 @@ class TestPostReview:
 
         mock_pr.create_review.assert_not_called()
         mock_pr.create_issue_comment.assert_called_once()
+
+    @patch("grippy.github_review.Github")
+    def test_skips_existing_comment_matching_finding(self, mock_github_cls: MagicMock) -> None:
+        """Findings matching existing grippy comments are not re-posted."""
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        # Existing comment matches our finding
+        existing = MagicMock()
+        existing.body = "old\n<!-- grippy:src/app.py:security:9 -->"
+        existing.node_id = "PRRT_1"
+        mock_pr.get_review_comments.return_value = [existing]
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new_line\n line2\n"
+        )
+        finding = _make_finding(file="src/app.py", line_start=9, category="security")
+
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[finding],
+            head_sha="abc123",
+            diff=diff,
+            score=80,
+            verdict="PASS",
+        )
+
+        # Should NOT post inline since the finding already exists
+        mock_pr.create_review.assert_not_called()
+
+    @patch("grippy.github_review.resolve_threads")
+    @patch("grippy.github_review.Github")
+    def test_resolves_absent_findings(
+        self, mock_github_cls: MagicMock, mock_resolve: MagicMock
+    ) -> None:
+        """Existing comments not in current findings get their threads resolved."""
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+        mock_resolve.return_value = 1
+
+        # Existing comment for a finding that's no longer present
+        old_comment = MagicMock()
+        old_comment.body = "old\n<!-- grippy:old.py:logic:5 -->"
+        old_comment.node_id = "PRRT_old"
+        mock_pr.get_review_comments.return_value = [old_comment]
+
+        # Current findings don't include old.py:logic:5
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[],
+            head_sha="abc",
+            diff="",
+            score=90,
+            verdict="PASS",
+        )
+
+        mock_resolve.assert_called_once()
+        call_kwargs = mock_resolve.call_args[1]
+        assert "PRRT_old" in call_kwargs["thread_ids"]
 
 
 # --- resolve_threads ---
@@ -556,7 +629,7 @@ class TestResolveThreads:
         assert count == 0
 
 
-# --- parse_diff_lines edge cases (Commit 1, Issue #1) ---
+# --- parse_diff_lines edge cases ---
 
 
 class TestParseDiffLinesEdgeCases:
@@ -578,10 +651,8 @@ class TestParseDiffLinesEdgeCases:
         )
         result = parse_diff_lines(diff)
         assert "f.py" in result
-        # line1 is at right_line=1 (context), new_line2 at right_line=2 (added)
         assert 1 in result["f.py"]
         assert 2 in result["f.py"]
-        # The marker line should NOT have incremented the counter or added a line
         assert len(result["f.py"]) == 2
 
     def test_binary_metadata_no_crash(self) -> None:
@@ -590,7 +661,6 @@ class TestParseDiffLinesEdgeCases:
 
         diff = "diff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n"
         result = parse_diff_lines(diff)
-        # Should have the file entry, but no addressable lines
         assert result.get("img.png", set()) == set()
 
     def test_only_space_prefix_is_context(self) -> None:
@@ -608,59 +678,13 @@ class TestParseDiffLinesEdgeCases:
             " more_context\n"
         )
         result = parse_diff_lines(diff)
-        # context_line=1, added_line=2, tilde ignored, more_context=3
         assert 1 in result["f.py"]
         assert 2 in result["f.py"]
         assert 3 in result["f.py"]
         assert len(result["f.py"]) == 3
 
 
-# --- post_review 422 fallback (Commit 1, Issue #5) ---
-
-
-# --- resolve_threads GraphQL variables (Commit 3, Issue #2) ---
-
-
-class TestResolveThreadsGraphQLVariables:
-    """resolve_threads must use GraphQL variables, not string interpolation."""
-
-    @patch("grippy.github_review.subprocess.run")
-    def test_uses_graphql_variables(self, mock_run: MagicMock) -> None:
-        """Mutation uses $threadId variable placeholder + separate -f arg."""
-        from grippy.github_review import resolve_threads
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
-        resolve_threads(repo="org/repo", pr_number=1, thread_ids=["PRRT_abc123"])
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        # Must have -f query=... with $threadId variable placeholder
-        query_args = [a for a in cmd if a.startswith("query=")]
-        assert len(query_args) == 1
-        assert "$threadId" in query_args[0]
-        # Must NOT have the thread ID interpolated into the query
-        assert "PRRT_abc123" not in query_args[0]
-        # Must have separate -f threadId=PRRT_abc123
-        thread_args = [a for a in cmd if a.startswith("threadId=")]
-        assert len(thread_args) == 1
-        assert thread_args[0] == "threadId=PRRT_abc123"
-
-    @patch("grippy.github_review.subprocess.run")
-    def test_validates_thread_id_safely(self, mock_run: MagicMock) -> None:
-        """Malicious thread_id is passed as variable, not interpolated."""
-        from grippy.github_review import resolve_threads
-
-        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
-        malicious_id = 'malicious"injection'
-        resolve_threads(repo="org/repo", pr_number=1, thread_ids=[malicious_id])
-
-        cmd = mock_run.call_args[0][0]
-        # Query must not contain the malicious string
-        query_args = [a for a in cmd if a.startswith("query=")]
-        assert malicious_id not in query_args[0]
-        # But it should be in the variable arg
-        thread_args = [a for a in cmd if a.startswith("threadId=")]
-        assert thread_args[0] == f"threadId={malicious_id}"
+# --- post_review 422 fallback ---
 
 
 class TestPostReview422Fallback:
@@ -676,6 +700,7 @@ class TestPostReview422Fallback:
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
         mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_pr.head.repo.full_name = "org/repo"
         mock_pr.base.repo.full_name = "org/repo"
         mock_pr.create_review.side_effect = GithubException(
@@ -690,12 +715,11 @@ class TestPostReview422Fallback:
         findings = [_make_finding(file="src/app.py", line_start=9)]
 
         # Should NOT raise
-        resolution = post_review(
+        post_review(
             token="test-token",
             repo="org/repo",
             pr_number=1,
             findings=findings,
-            prior_findings=[],
             head_sha="abc123",
             diff=diff,
             score=80,
@@ -706,65 +730,6 @@ class TestPostReview422Fallback:
         mock_pr.create_issue_comment.assert_called_once()
         body = mock_pr.create_issue_comment.call_args[0][0]
         assert "Off-diff findings" in body
-        assert resolution is not None
-
-    @patch("grippy.github_review.Github")
-    def test_422_partial_batch(self, mock_github_cls: MagicMock) -> None:
-        """First batch succeeds, second raises 422 — first batch posted."""
-        from github import GithubException
-
-        from grippy.github_review import _REVIEW_BATCH_SIZE, post_review
-
-        mock_pr = MagicMock()
-        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
-        mock_pr.get_issue_comments.return_value = []
-        mock_pr.head.repo.full_name = "org/repo"
-        mock_pr.base.repo.full_name = "org/repo"
-
-        call_count = 0
-
-        def _side_effect(**kwargs: object) -> None:
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:
-                raise GithubException(422, {"message": "Validation Failed"}, None)
-
-        mock_pr.create_review.side_effect = _side_effect
-
-        # Create enough findings to span 2+ batches
-        diff_lines = ""
-        findings = []
-        for i in range(_REVIEW_BATCH_SIZE + 5):
-            line_num = 10 + i
-            diff_lines += f"+line{i}\n"
-            findings.append(
-                _make_finding(
-                    file="src/app.py",
-                    line_start=line_num,
-                    title=f"Finding {i}",
-                )
-            )
-
-        hunk_header = f"@@ -8,3 +8,{_REVIEW_BATCH_SIZE + 10} @@\n"
-        diff = (
-            "diff --git a/src/app.py b/src/app.py\n"
-            "--- a/src/app.py\n+++ b/src/app.py\n" + hunk_header + " line\n" + diff_lines
-        )
-
-        post_review(
-            token="test-token",
-            repo="org/repo",
-            pr_number=1,
-            findings=findings,
-            prior_findings=[],
-            head_sha="abc123",
-            diff=diff,
-            score=70,
-            verdict="PASS",
-        )
-
-        # First batch succeeded, second failed
-        assert mock_pr.create_review.call_count == 2
 
     @patch("grippy.github_review.Github")
     def test_non_422_propagates(self, mock_github_cls: MagicMock) -> None:
@@ -776,6 +741,7 @@ class TestPostReview422Fallback:
         mock_pr = MagicMock()
         mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
         mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
         mock_pr.head.repo.full_name = "org/repo"
         mock_pr.base.repo.full_name = "org/repo"
         mock_pr.create_review.side_effect = GithubException(
@@ -795,9 +761,48 @@ class TestPostReview422Fallback:
                 repo="org/repo",
                 pr_number=1,
                 findings=findings,
-                prior_findings=[],
                 head_sha="abc123",
                 diff=diff,
                 score=80,
                 verdict="PASS",
             )
+
+
+# --- resolve_threads GraphQL variables ---
+
+
+class TestResolveThreadsGraphQLVariables:
+    """resolve_threads must use GraphQL variables, not string interpolation."""
+
+    @patch("grippy.github_review.subprocess.run")
+    def test_uses_graphql_variables(self, mock_run: MagicMock) -> None:
+        """Mutation uses $threadId variable placeholder + separate -f arg."""
+        from grippy.github_review import resolve_threads
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
+        resolve_threads(repo="org/repo", pr_number=1, thread_ids=["PRRT_abc123"])
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        query_args = [a for a in cmd if a.startswith("query=")]
+        assert len(query_args) == 1
+        assert "$threadId" in query_args[0]
+        assert "PRRT_abc123" not in query_args[0]
+        thread_args = [a for a in cmd if a.startswith("threadId=")]
+        assert len(thread_args) == 1
+        assert thread_args[0] == "threadId=PRRT_abc123"
+
+    @patch("grippy.github_review.subprocess.run")
+    def test_validates_thread_id_safely(self, mock_run: MagicMock) -> None:
+        """Malicious thread_id is passed as variable, not interpolated."""
+        from grippy.github_review import resolve_threads
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="{}")
+        malicious_id = 'malicious"injection'
+        resolve_threads(repo="org/repo", pr_number=1, thread_ids=[malicious_id])
+
+        cmd = mock_run.call_args[0][0]
+        query_args = [a for a in cmd if a.startswith("query=")]
+        assert malicious_id not in query_args[0]
+        thread_args = [a for a in cmd if a.startswith("threadId=")]
+        assert thread_args[0] == f"threadId={malicious_id}"

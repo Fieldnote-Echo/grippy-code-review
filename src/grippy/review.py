@@ -29,13 +29,33 @@ from typing import Any
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
-from grippy.graph import FindingStatus, review_to_graph
-from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
-from grippy.schema import GrippyReview
 
-# Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
-MAX_DIFF_CHARS = 200_000
+# Max diff size sent to the LLM — ~500K chars ≈ 125K tokens
+MAX_DIFF_CHARS = 500_000
+
+
+_ERROR_HINTS: dict[str, str] = {
+    "CONFIG ERROR": "Valid `GRIPPY_TRANSPORT` values: `openai`, `local`.",
+    "TIMEOUT": "Increase `GRIPPY_TIMEOUT` or reduce PR diff size.",
+}
+
+
+def _failure_comment(repo: str, error_type: str) -> str:
+    """Build a generic error comment for posting to a PR."""
+    hint = _ERROR_HINTS.get(error_type, "")
+    hint_line = f"\n\n{hint}" if hint else ""
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    if run_id:
+        log_url = f"https://github.com/{repo}/actions/runs/{run_id}"
+    else:
+        log_url = f"https://github.com/{repo}/actions"
+    return (
+        f"## \u274c Grippy Review \u2014 {error_type}\n\n"
+        f"Review failed. Check the [Actions log]({log_url}) for details."
+        f"{hint_line}\n\n"
+        "<!-- grippy-error -->"
+    )
 
 
 def load_pr_event(event_path: Path) -> dict[str, Any]:
@@ -60,40 +80,6 @@ def load_pr_event(event_path: Path) -> dict[str, Any]:
         "base_ref": pr["base"]["ref"],
         "description": pr.get("body") or "",
     }
-
-
-def parse_review_response(content: Any) -> GrippyReview:
-    """Parse agent response content into GrippyReview.
-
-    Handles three response shapes from Agno:
-    - GrippyReview instance (structured output worked)
-    - dict (parsed JSON object)
-    - str (raw JSON string)
-
-    Raises:
-        ValueError: If content can't be parsed or validated.
-    """
-    if isinstance(content, GrippyReview):
-        return content
-    if isinstance(content, dict):
-        try:
-            return GrippyReview.model_validate(content)
-        except Exception as exc:
-            msg = f"Failed to validate review dict: {exc}"
-            raise ValueError(msg) from exc
-    if isinstance(content, str):
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError as exc:
-            msg = f"Failed to parse review response as JSON: {exc}"
-            raise ValueError(msg) from exc
-        try:
-            return GrippyReview.model_validate(data)
-        except Exception as exc:
-            msg = f"Failed to validate review JSON: {exc}"
-            raise ValueError(msg) from exc
-    msg = f"Unexpected response type: {type(content).__name__}"
-    raise ValueError(msg)
 
 
 def truncate_diff(diff: str, max_chars: int = MAX_DIFF_CHARS) -> str:
@@ -264,13 +250,13 @@ def main() -> None:
             tool_call_limit=10 if codebase_tools else None,
         )
     except ValueError as exc:
-        error_body = (
-            f"## \u274c Grippy Review \u2014 CONFIG ERROR\n\n"
-            f"Invalid configuration: `{exc}`\n\n"
-            f"Valid GRIPPY_TRANSPORT values: `openai`, `local`\n\n"
-            f"<!-- grippy-error -->"
+        print(f"::error::Invalid configuration: {exc}")
+        post_comment(
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
         )
-        post_comment(token, pr_event["repo"], pr_event["pr_number"], error_body)
         sys.exit(1)
 
     # 3. Fetch diff (M2: graceful 403 handling for fork PRs)
@@ -286,12 +272,12 @@ def main() -> None:
                 "the token has read access to the fork."
             )
         try:
-            failure_body = (
-                f"## \u274c Grippy Review \u2014 DIFF FETCH ERROR\n\n"
-                f"Could not fetch PR diff: `{exc}`\n\n"
-                f"<!-- grippy-error -->"
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "DIFF ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass  # Don't mask the original error
         sys.exit(1)
@@ -301,7 +287,8 @@ def main() -> None:
     # H2: cap diff size to avoid overflowing LLM context
     original_len = len(diff)
     diff = truncate_diff(diff)
-    if len(diff) < original_len:
+    diff_truncated = len(diff) < original_len
+    if diff_truncated:
         print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
 
     # 4. Format context
@@ -322,41 +309,37 @@ def main() -> None:
         )
     except ReviewParseError as exc:
         print(f"::error::Grippy review failed after {exc.attempts} attempts: {exc}")
-        raw_preview = exc.last_raw[:500]
         try:
-            failure_body = (
-                f"## ❌ Grippy Review — PARSE ERROR\n\n"
-                f"Failed after {exc.attempts} attempts.\n\n"
-                f"```\n{raw_preview}\n```\n\n"
-                f"<!-- grippy-error -->"
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "PARSE ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
     except TimeoutError as exc:
         print(f"::error::Grippy review timed out: {exc}")
         try:
-            failure_body = (
-                f"## \u274c Grippy Review \u2014 TIMEOUT\n\n"
-                f"Review timed out after {timeout_seconds}s.\n\n"
-                f"Model: {model_id} at {base_url}\n\n"
-                f"<!-- grippy-error -->"
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "TIMEOUT"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
     except Exception as exc:
         print(f"::error::Grippy agent failed: {exc}")
         try:
-            failure_body = (
-                f"## ❌ Grippy Review — ERROR\n\n"
-                f"Review agent failed: `{exc}`\n\n"
-                f"Model: {model_id} at {base_url}\n\n"
-                f"<!-- grippy-error -->"
+            post_comment(
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
@@ -367,48 +350,20 @@ def main() -> None:
     print(f"  Score: {review.score.overall}/100 — {review.verdict.status.value}")
     print(f"  Findings: {len(review.findings)}")
 
-    # 6. Build graph, get prior findings, THEN persist (non-fatal)
-    session_id = f"pr-{pr_event['pr_number']}"
-    prior_findings: list[dict[str, Any]] = []
-    store: GrippyStore | None = None
-    print("Persisting review graph...")
-    try:
-        embedder = create_embedder(
-            transport=transport or "local",
-            model=embedding_model,
-            base_url=base_url,
-        )
-        graph = review_to_graph(review)
-        store = GrippyStore(
-            graph_db_path=data_dir / "grippy-graph.db",
-            lance_dir=data_dir / "lance",
-            embedder=embedder,
-        )
-        # Query prior findings BEFORE storing current round
-        try:
-            prior_findings = store.get_prior_findings(session_id=session_id)
-        except Exception:
-            prior_findings = []
-        store.store_review(graph, session_id=session_id)
-        print(f"  Graph: {len(graph.nodes)} nodes persisted")
-    except Exception as exc:
-        print(f"::warning::Graph persistence failed: {exc}")
-
-    # 7. Post review with inline comments + summary dashboard
+    # 6. Post review — GitHub owns finding lifecycle
     head_sha = pr_event.get("head_sha", "")
     print("Posting review...")
-    resolution = None
     try:
-        resolution = post_review(
+        post_review(
             token=token,
             repo=pr_event["repo"],
             pr_number=pr_event["pr_number"],
             findings=review.findings,
-            prior_findings=prior_findings,
             head_sha=head_sha,
             diff=diff,
             score=review.score.overall,
             verdict=review.verdict.status.value,
+            diff_truncated=diff_truncated,
         )
         print("  Done.")
     except Exception as exc:
@@ -418,24 +373,12 @@ def main() -> None:
                 token,
                 pr_event["repo"],
                 pr_event["pr_number"],
-                f"## Grippy Review\n\n**Review completed** (score: "
-                f"{review.score.overall}/100, {review.verdict.status.value}) "
-                f"but **failed to post inline comments**: {exc}\n\n"
-                f"<!-- grippy-error -->",
+                _failure_comment(pr_event["repo"], "POST ERROR"),
             )
         except Exception:
             pass  # Don't mask the original error
 
-    # 8. Update resolved finding status in graph DB (non-fatal)
-    if resolution is not None and resolution.resolved and store is not None:
-        try:
-            for resolved in resolution.resolved:
-                store.update_finding_status(resolved["node_id"], FindingStatus.RESOLVED)
-            print(f"  Marked {len(resolution.resolved)} findings as resolved")
-        except Exception as exc:
-            print(f"::warning::Failed to update finding status: {exc}")
-
-    # 8. Set outputs for GitHub Actions
+    # 7. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
         with open(github_output, "a") as f:

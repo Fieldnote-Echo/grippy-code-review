@@ -49,6 +49,7 @@ _MAX_RESULT_CHARS = 12_000
 
 # Safety limits for indexing
 _MAX_INDEX_FILES = 5_000
+_MAX_GLOB_RESULTS = 500
 
 
 # --- Protocols ---
@@ -360,6 +361,10 @@ def _make_grep_code(repo_root: Path) -> Any:
             return f"Invalid regex: {e}"
 
         try:
+            # Use -r (not -R) to prevent following symlinks on GNU grep.
+            # On BSD grep, -r follows symlinks; -S is needed to prevent it,
+            # but -S is not recognised by GNU grep.  Since CI targets Linux
+            # (GNU grep), -r alone is sufficient.
             cmd = [
                 "grep",
                 "-rn",
@@ -403,7 +408,7 @@ def _make_read_file(repo_root: Path) -> Any:
         # Prevent path traversal
         try:
             target = target.resolve()
-            if not str(target).startswith(str(repo_root.resolve())):
+            if not target.is_relative_to(repo_root.resolve()):
                 return "Error: path traversal not allowed."
         except (OSError, ValueError):
             return "Error: invalid path."
@@ -448,7 +453,7 @@ def _make_list_files(repo_root: Path) -> Any:
         # Prevent path traversal
         try:
             target = target.resolve()
-            if not str(target).startswith(str(repo_root.resolve())):
+            if not target.is_relative_to(repo_root.resolve()):
                 return "Error: path traversal not allowed."
         except (OSError, ValueError):
             return "Error: invalid path."
@@ -457,8 +462,19 @@ def _make_list_files(repo_root: Path) -> Any:
             return f"Directory not found: {path}"
 
         try:
-            entries = sorted(target.glob(glob_pattern))
-        except (OSError, ValueError) as e:
+            resolved_root = repo_root.resolve()
+            # Collect up to _MAX_GLOB_RESULTS+1 entries lazily to detect truncation
+            # without expanding/sorting the entire glob iterator.
+            collected: list[Path] = []
+            truncated = False
+            for entry in target.glob(glob_pattern):
+                if entry.resolve().is_relative_to(resolved_root):
+                    collected.append(entry)
+                    if len(collected) > _MAX_GLOB_RESULTS:
+                        truncated = True
+                        break
+            entries = sorted(collected[:_MAX_GLOB_RESULTS])
+        except (OSError, ValueError, RuntimeError) as e:
             return f"Error listing files: {e}"
 
         lines: list[str] = []
@@ -469,6 +485,13 @@ def _make_list_files(repo_root: Path) -> Any:
 
         if not lines:
             return f"No files matching '{glob_pattern}' in {path}/"
+
+        if truncated:
+            lines.insert(
+                0,
+                f"[truncated] showing first {_MAX_GLOB_RESULTS} results; "
+                "refine glob_pattern for complete listing",
+            )
 
         return _limit_result("\n".join(lines))
 

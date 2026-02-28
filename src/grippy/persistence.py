@@ -1,23 +1,23 @@
-"""Graph-aware persistence — SQLite for edges, LanceDB for vectors.
+"""Graph-aware persistence — SQLite for nodes/edges, LanceDB for vectors.
 
-Stores ReviewGraph data in two backends:
-- SQLite: edge junction table (source_id, edge_type, target_id, metadata)
+Stores codebase knowledge data (not finding lifecycle — that's GitHub's job):
+- SQLite: nodes table + edges junction table with composite indexes
 - LanceDB: node records with vector embeddings for semantic search
 
-Both are embedded/file-based. No servers. Designed to migrate cleanly to
-SurrealDB: edges become graph relations, nodes become records.
+Uses the navi-chat SQLite graph pattern: deterministic node IDs, UPSERT
+for idempotent writes, single-pass SQL joins for graph traversals.
 """
 
 from __future__ import annotations
 
-import json
+import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 import lancedb  # type: ignore[import-untyped]
 
-from grippy.graph import EdgeType, FindingStatus, NodeType, ReviewGraph
+from grippy.graph import NodeType
 
 # --- Types ---
 
@@ -45,44 +45,69 @@ def _arrow_table_to_dicts(table: Any) -> list[dict[str, Any]]:
     return [{col: arrays[col][i] for col in columns} for i in range(n_rows)]
 
 
+# --- Deterministic node IDs ---
+
+
+def _record_id(node_type: NodeType | str, *parts: str) -> str:
+    """Deterministic node ID: '{TYPE}:{sha256[:12]}'.
+
+    Format preserved from the original ``node_id()`` — the node type is
+    included in the hash input so different types with the same parts
+    produce different digests.
+    """
+    type_str = node_type.value if isinstance(node_type, NodeType) else node_type
+    raw = ":".join([type_str, *parts])
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:12]
+    return f"{type_str.upper()}:{digest}"
+
+
 # --- SQLite schema ---
 
-_EDGE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS edges (
-    source_id TEXT NOT NULL,
-    edge_type TEXT NOT NULL,
-    target_id TEXT NOT NULL,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    UNIQUE(source_id, edge_type, target_id)
-)
-"""
-
-_EDGE_INDEXES_SQL = [
-    "CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id)",
-    "CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)",
-    "CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type)",
+_PRAGMAS = [
+    "PRAGMA journal_mode=WAL",
+    "PRAGMA foreign_keys=ON",
+    "PRAGMA busy_timeout=5000",
+    "PRAGMA synchronous=NORMAL",
 ]
 
-_NODE_META_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS node_meta (
-    node_id TEXT PRIMARY KEY,
-    node_type TEXT NOT NULL,
-    label TEXT NOT NULL,
-    properties TEXT NOT NULL DEFAULT '{}',
-    review_id TEXT,
-    session_id TEXT,
-    created_at TEXT NOT NULL
+_NODES_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS nodes (
+    id          TEXT PRIMARY KEY,
+    type        TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    data        TEXT NOT NULL DEFAULT '{}',
+    session_id  TEXT,
+    status      TEXT,
+    fingerprint TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT
 )
 """
 
-_MIGRATIONS = [
-    # v1.1: add session_id for PR-scoped finding lifecycle
-    "ALTER TABLE node_meta ADD COLUMN session_id TEXT",
+_EDGES_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS edges (
+    source       TEXT NOT NULL,
+    target       TEXT NOT NULL,
+    relationship TEXT NOT NULL,
+    weight       REAL NOT NULL DEFAULT 1.0,
+    properties   TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL,
+    UNIQUE (source, relationship, target),
+    FOREIGN KEY (source) REFERENCES nodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (target) REFERENCES nodes(id) ON DELETE CASCADE
+)
+"""
+
+_INDEXES_SQL = [
+    "CREATE INDEX IF NOT EXISTS idx_nodes_type_label   ON nodes(type, label)",
+    "CREATE INDEX IF NOT EXISTS idx_nodes_type_session ON nodes(type, session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_edges_source_rel ON edges(source, relationship)",
+    "CREATE INDEX IF NOT EXISTS idx_edges_target_rel ON edges(target, relationship)",
 ]
 
 
 class GrippyStore:
-    """Graph-aware persistence — SQLite for edges, LanceDB for vectors."""
+    """Graph-aware persistence — SQLite for nodes/edges, LanceDB for vectors."""
 
     def __init__(
         self,
@@ -108,145 +133,168 @@ class GrippyStore:
 
     def _init_sqlite(self) -> None:
         cur = self._conn.cursor()
-        cur.execute(_EDGE_TABLE_SQL)
-        for idx_sql in _EDGE_INDEXES_SQL:
+        for pragma in _PRAGMAS:
+            cur.execute(pragma)
+        self._migrate_v1_schema(cur)
+        cur.execute(_NODES_TABLE_SQL)
+        cur.execute(_EDGES_TABLE_SQL)
+        self._add_updated_at_column(cur)
+        for idx_sql in _INDEXES_SQL:
             cur.execute(idx_sql)
-        cur.execute(_NODE_META_TABLE_SQL)
-        for migration in _MIGRATIONS:
-            try:
-                cur.execute(migration)
-            except sqlite3.OperationalError as exc:
-                msg = str(exc).lower()
-                if "already exists" in msg or "duplicate column" in msg:
-                    pass  # Column already present — skip
-                else:
-                    raise  # Real error — propagate
         self._conn.commit()
+
+    @staticmethod
+    def _migrate_v1_schema(cur: sqlite3.Cursor) -> None:
+        """Drop incompatible v1 tables if present.
+
+        The v1 schema had edges(source_id, edge_type, target_id, metadata)
+        and a node_meta table.  ``CREATE TABLE IF NOT EXISTS`` would silently
+        keep the old columns, causing INSERT failures at runtime.  Since
+        graph data is ephemeral per-PR (reconstructed each review round),
+        dropping and recreating is safe.
+        """
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='edges'")
+        if cur.fetchone() is not None:
+            cur.execute("PRAGMA table_info(edges)")
+            columns = {row[1] for row in cur.fetchall()}
+            if "source_id" in columns:
+                # v1 edges — always drop
+                cur.execute("DROP TABLE IF EXISTS edges")
+                cur.execute("DROP TABLE IF EXISTS node_meta")
+                # Only drop nodes if it also has v1 schema (no session_id column)
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes'")
+                if cur.fetchone() is not None:
+                    cur.execute("PRAGMA table_info(nodes)")
+                    node_columns = {row[1] for row in cur.fetchall()}
+                    if "session_id" not in node_columns:
+                        cur.execute("DROP TABLE IF EXISTS nodes")
+
+    @staticmethod
+    def _add_updated_at_column(cur: sqlite3.Cursor) -> None:
+        """Add updated_at column if missing (backfill from created_at)."""
+        cur.execute("PRAGMA table_info(nodes)")
+        columns = {row[1] for row in cur.fetchall()}
+        if "updated_at" not in columns:
+            cur.execute("ALTER TABLE nodes ADD COLUMN updated_at TEXT")
+            cur.execute("UPDATE nodes SET updated_at = created_at WHERE updated_at IS NULL")
 
     def _ensure_nodes_table(self) -> lancedb.table.Table | None:
         """Open existing nodes table if present."""
         if self._nodes_table is not None:
             return self._nodes_table
-        existing_tables = self._lance_db.list_tables()
-        if "nodes" in existing_tables:
+        try:
             self._nodes_table = self._lance_db.open_table("nodes")
+        except (FileNotFoundError, ValueError):
+            # FileNotFoundError: table directory doesn't exist on disk
+            # ValueError: LanceDB metadata references a missing/corrupt table
+            pass
         return self._nodes_table
 
-    # --- Store ---
+    # --- Write ops ---
 
-    def store_review(self, graph: ReviewGraph, *, session_id: str = "") -> None:
-        """Persist a ReviewGraph — edges to SQLite, nodes to LanceDB."""
-        self._store_edges(graph, session_id=session_id)
-        self._store_nodes(graph)
+    def _compute_embeddings(self, texts: list[str]) -> list[list[float]]:
+        """Compute embedding vectors for all texts (pure, no side effects)."""
+        if not texts:
+            return []
+        if isinstance(self._embedder, BatchEmbedder):
+            return self._embedder.get_embedding_batch(texts)
+        return [self._embedder.get_embedding(t) for t in texts]
 
-    def _store_edges(self, graph: ReviewGraph, *, session_id: str = "") -> None:
+    def _upsert_sqlite(
+        self,
+        nodes: list[dict[str, Any]],
+        edges: list[tuple[str, str, str, str]],
+    ) -> None:
+        """UPSERT all nodes and edges in a single SQLite transaction."""
         cur = self._conn.cursor()
-        for node in graph.nodes:
-            # Store node metadata
-            cur.execute(
-                "INSERT OR IGNORE INTO node_meta "
-                "(node_id, node_type, label, properties, review_id, session_id, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    node.id,
-                    node.type.value,
-                    node.label,
-                    json.dumps(node.properties),
-                    node.source_review_id,
-                    session_id,
-                    node.created_at,
-                ),
-            )
-            for edge in node.edges:
+        cur.execute("BEGIN")
+        try:
+            for node in nodes:
                 cur.execute(
-                    "INSERT OR IGNORE INTO edges "
-                    "(source_id, edge_type, target_id, metadata) "
-                    "VALUES (?, ?, ?, ?)",
+                    """INSERT INTO nodes
+                    (id, type, label, data, session_id, status, fingerprint, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        label = excluded.label,
+                        data = excluded.data,
+                        session_id = excluded.session_id,
+                        status = excluded.status,
+                        fingerprint = excluded.fingerprint,
+                        created_at = nodes.created_at,
+                        updated_at = excluded.updated_at""",
                     (
-                        node.id,
-                        edge.type.value,
-                        edge.target_id,
-                        json.dumps(edge.metadata),
+                        node["id"],
+                        node["type"],
+                        node["label"],
+                        node["data"],
+                        node["session_id"],
+                        node["status"],
+                        node["fingerprint"],
+                        node["created_at"],
+                        node["updated_at"],
                     ),
                 )
-        self._conn.commit()
+            for source, target, relationship, properties in edges:
+                cur.execute(
+                    """INSERT INTO edges (source, target, relationship, properties, created_at)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(source, relationship, target) DO UPDATE SET
+                        properties = excluded.properties""",
+                    (source, target, relationship, properties),
+                )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
 
-    def _store_nodes(self, graph: ReviewGraph) -> None:
-        """Embed and store nodes in LanceDB for vector search."""
+    def _upsert_vectors(
+        self,
+        nodes: list[dict[str, Any]],
+        vectors: list[list[float]],
+    ) -> None:
+        """Upsert node vectors into LanceDB."""
+        if not nodes:
+            return
+
         records: list[dict[str, Any]] = []
-        texts: list[str] = []
-        for node in graph.nodes:
-            text = f"{node.type.value}: {node.label}"
-            if node.properties:
-                props_str = " ".join(f"{k}={v}" for k, v in node.properties.items())
-                text = f"{text} {props_str}"
-            texts.append(text)
+        for node, vec in zip(nodes, vectors, strict=True):
             records.append(
                 {
-                    "node_id": node.id,
-                    "node_type": node.type.value,
-                    "label": node.label,
-                    "text": text,
-                    "review_id": node.source_review_id or "",
+                    "node_id": node["id"],
+                    "node_type": node["type"],
+                    "label": node["label"],
+                    "text": f"{node['type']}: {node['label']}",
+                    "review_id": "",
+                    "vector": vec,
                 }
             )
 
-        if not records:
-            return
-
-        if isinstance(self._embedder, BatchEmbedder):
-            vectors = self._embedder.get_embedding_batch(texts)
-        else:
-            vectors = [self._embedder.get_embedding(t) for t in texts]
-        for rec, vec in zip(records, vectors, strict=True):
-            rec["vector"] = vec
-
         table = self._ensure_nodes_table()
         if table is None:
-            # First time — create table with initial records
             self._nodes_table = self._lance_db.create_table("nodes", data=records)
         else:
-            # Table exists — add only records with new IDs
             arrow_tbl = table.to_arrow()
-            existing_ids = set(arrow_tbl.column("node_id").to_pylist())
-            new_records = [r for r in records if r["node_id"] not in existing_ids]
-            if new_records:
-                table.add(new_records)
-
-    # --- Edge queries ---
-
-    def get_all_edges(self) -> list[dict[str, Any]]:
-        """Return all edges as dicts."""
-        cur = self._conn.cursor()
-        cur.execute("SELECT source_id, edge_type, target_id, metadata FROM edges")
-        return [dict(row) for row in cur.fetchall()]
-
-    def get_edges_by_source(self, source_id: str) -> list[dict[str, Any]]:
-        """Return edges originating from a specific node."""
-        cur = self._conn.cursor()
-        cur.execute(
-            "SELECT source_id, edge_type, target_id, metadata FROM edges WHERE source_id = ?",
-            (source_id,),
-        )
-        return [dict(row) for row in cur.fetchall()]
-
-    def get_edges_by_type(self, edge_type: EdgeType) -> list[dict[str, Any]]:
-        """Return edges of a specific type."""
-        cur = self._conn.cursor()
-        cur.execute(
-            "SELECT source_id, edge_type, target_id, metadata FROM edges WHERE edge_type = ?",
-            (edge_type.value,),
-        )
-        return [dict(row) for row in cur.fetchall()]
-
-    def get_edges_by_target(self, target_id: str) -> list[dict[str, Any]]:
-        """Return edges pointing to a specific node."""
-        cur = self._conn.cursor()
-        cur.execute(
-            "SELECT source_id, edge_type, target_id, metadata FROM edges WHERE target_id = ?",
-            (target_id,),
-        )
-        return [dict(row) for row in cur.fetchall()]
+            existing = dict(
+                zip(
+                    arrow_tbl.column("node_id").to_pylist(),
+                    arrow_tbl.column("text").to_pylist(),
+                    strict=True,
+                )
+            )
+            stale_ids = {
+                r["node_id"]
+                for r in records
+                if r["node_id"] in existing and existing[r["node_id"]] != r["text"]
+            }
+            if stale_ids:
+                # node_ids are deterministic hex hashes from _record_id() — safe to interpolate
+                id_list = ", ".join(f"'{nid}'" for nid in stale_ids)
+                table.delete(f"node_id IN ({id_list})")
+            upsert_records = [
+                r for r in records if r["node_id"] not in existing or r["node_id"] in stale_ids
+            ]
+            if upsert_records:
+                table.add(upsert_records)
 
     # --- Node queries ---
 
@@ -256,89 +304,6 @@ class GrippyStore:
         if table is None:
             return []
         return _arrow_table_to_dicts(table.to_arrow())
-
-    # --- High-level queries ---
-
-    def get_author_tendencies(self, author: str) -> list[dict[str, Any]]:
-        """Get finding patterns associated with a specific author.
-
-        Walks: AUTHOR node → (via review_id) → FINDING nodes in same review.
-        Returns finding properties (title, severity, category, etc).
-        """
-        cur = self._conn.cursor()
-        # Find the author's node
-        cur.execute(
-            "SELECT node_id FROM node_meta WHERE node_type = ? AND label = ?",
-            (NodeType.AUTHOR.value, author),
-        )
-        author_rows = cur.fetchall()
-        if not author_rows:
-            return []
-
-        # Get review IDs that this author is associated with
-        review_ids = set()
-        for row in author_rows:
-            cur.execute(
-                "SELECT review_id FROM node_meta WHERE node_id = ?",
-                (row["node_id"],),
-            )
-            meta = cur.fetchone()
-            if meta and meta["review_id"]:
-                review_ids.add(meta["review_id"])
-
-        if not review_ids:
-            return []
-
-        # Get findings from those reviews
-        placeholders = ",".join("?" for _ in review_ids)
-        cur.execute(
-            f"SELECT label, properties FROM node_meta "
-            f"WHERE node_type = ? AND review_id IN ({placeholders})",
-            (NodeType.FINDING.value, *review_ids),
-        )
-        results = []
-        for row in cur.fetchall():
-            props = json.loads(row["properties"])
-            props["title"] = row["label"]
-            results.append(props)
-        return results
-
-    def get_patterns_for_file(self, file_path: str) -> list[dict[str, Any]]:
-        """Get findings associated with a specific file.
-
-        Walks: FILE node ← FOUND_IN ← FINDING nodes.
-        """
-        cur = self._conn.cursor()
-        # Find the file's node ID
-        cur.execute(
-            "SELECT node_id FROM node_meta WHERE node_type = ? AND label = ?",
-            (NodeType.FILE.value, file_path),
-        )
-        file_row = cur.fetchone()
-        if not file_row:
-            return []
-
-        # Find FOUND_IN edges pointing to this file
-        cur.execute(
-            "SELECT source_id FROM edges WHERE edge_type = ? AND target_id = ?",
-            (EdgeType.FOUND_IN.value, file_row["node_id"]),
-        )
-        finding_ids = [row["source_id"] for row in cur.fetchall()]
-        if not finding_ids:
-            return []
-
-        # Get finding details
-        placeholders = ",".join("?" for _ in finding_ids)
-        cur.execute(
-            f"SELECT label, properties FROM node_meta WHERE node_id IN ({placeholders})",
-            finding_ids,
-        )
-        results = []
-        for row in cur.fetchall():
-            props = json.loads(row["properties"])
-            props["title"] = row["label"]
-            results.append(props)
-        return results
 
     # --- Vector search ---
 
@@ -350,39 +315,3 @@ class GrippyStore:
         query_vec = self._embedder.get_embedding(query)
         arrow_result = table.search(query_vec).limit(k).to_arrow()
         return _arrow_table_to_dicts(arrow_result)
-
-    # --- Resolution queries ---
-
-    def get_prior_findings(self, *, session_id: str) -> list[dict[str, Any]]:
-        """Get open findings for a PR session.
-
-        Call BEFORE store_review() so only prior round findings are returned.
-        """
-        cur = self._conn.cursor()
-        cur.execute(
-            "SELECT node_id, label, properties FROM node_meta "
-            "WHERE node_type = ? AND session_id = ?",
-            (NodeType.FINDING.value, session_id),
-        )
-        results = []
-        for row in cur.fetchall():
-            props = json.loads(row["properties"])
-            if props.get("status") == "open":
-                props["node_id"] = row["node_id"]
-                props["title"] = row["label"]
-                results.append(props)
-        return results
-
-    def update_finding_status(self, node_id: str, status: str | FindingStatus) -> None:
-        """Update a finding's status in node_meta properties."""
-        cur = self._conn.cursor()
-        cur.execute("SELECT properties FROM node_meta WHERE node_id = ?", (node_id,))
-        row = cur.fetchone()
-        if row:
-            props = json.loads(row["properties"])
-            props["status"] = status
-            cur.execute(
-                "UPDATE node_meta SET properties = ? WHERE node_id = ?",
-                (json.dumps(props), node_id),
-            )
-            self._conn.commit()

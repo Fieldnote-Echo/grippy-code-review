@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from grippy.codebase import (
+    _MAX_GLOB_RESULTS,
     _MAX_RESULT_CHARS,
     CodebaseIndex,
     CodebaseToolkit,
@@ -421,6 +422,20 @@ class TestReadFileTool:
         result = read("../../etc/passwd")
         assert "not allowed" in result.lower() or "not found" in result.lower()
 
+    def test_read_file_rejects_prefix_bypass(self, tmp_path: Path) -> None:
+        """H1: startswith bypass via shared prefix — e.g. /repo vs /repo-evil."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("safe content")
+
+        evil_dir = tmp_path / "repo-evil"
+        evil_dir.mkdir()
+        (evil_dir / "secrets.py").write_text("stolen secrets")
+
+        read_fn = _make_read_file(repo_root)
+        result = read_fn("../repo-evil/secrets.py")
+        assert "path traversal not allowed" in result.lower()
+
 
 # --- list_files tool tests ---
 
@@ -453,6 +468,57 @@ class TestListFilesTool:
         ls = _make_list_files(tmp_repo)
         result = ls("../..")
         assert "not allowed" in result.lower() or "not found" in result.lower()
+
+    def test_list_files_rejects_prefix_bypass(self, tmp_path: Path) -> None:
+        """H1: startswith bypass in list_files."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("x")
+
+        evil_dir = tmp_path / "repo-evil"
+        evil_dir.mkdir()
+        (evil_dir / "secrets.py").write_text("stolen")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn("../repo-evil")
+        assert "path traversal not allowed" in result.lower()
+
+    def test_list_files_glob_cannot_escape_boundary(self, tmp_path: Path) -> None:
+        """H2: glob results must be bounded by repo_root."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "safe.py").write_text("x")
+
+        outside = tmp_path / "outside.py"
+        outside.write_text("outside content")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "../../*")
+        assert "outside.py" not in result
+
+    def test_list_files_truncation_notice(self, tmp_path: Path) -> None:
+        """Glob results exceeding _MAX_GLOB_RESULTS show a truncation notice."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        for i in range(_MAX_GLOB_RESULTS + 10):
+            (repo_root / f"file_{i:05d}.txt").write_text("x")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "*.txt")
+        assert "[truncated]" in result
+        assert str(_MAX_GLOB_RESULTS) in result
+
+    def test_list_files_no_truncation_within_limit(self, tmp_path: Path) -> None:
+        """Glob results within _MAX_GLOB_RESULTS have no truncation notice."""
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        for i in range(5):
+            (repo_root / f"file_{i}.txt").write_text("x")
+
+        list_fn = _make_list_files(repo_root)
+        result = list_fn(".", "*.txt")
+        assert "[truncated]" not in result
+        assert "file_0.txt" in result
 
 
 # --- CodebaseToolkit tests ---
@@ -551,10 +617,8 @@ class TestMainWiring:
     @patch("grippy.review.run_review")
     @patch("grippy.review.fetch_pr_diff")
     @patch("grippy.review.create_embedder")
-    @patch("grippy.review.GrippyStore")
     def test_codebase_index_wired_in_main(
         self,
-        mock_store_cls: MagicMock,
         mock_create_embedder: MagicMock,
         mock_fetch_diff: MagicMock,
         mock_run_review: MagicMock,
@@ -642,9 +706,6 @@ class TestMainWiring:
         mock_fetch_diff.return_value = "diff --git a/test.py b/test.py\n+hello\n"
         mock_run_review.return_value = review
         mock_post_review.return_value = None
-        mock_store = MagicMock()
-        mock_store.get_prior_findings.return_value = []
-        mock_store_cls.return_value = mock_store
         mock_create_embedder.return_value = MagicMock()
 
         env = {
