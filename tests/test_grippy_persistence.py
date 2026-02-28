@@ -414,7 +414,7 @@ class TestIdempotency:
         review_v1 = _make_review(findings=[finding_v1])
         store.store_review(review_v1)
 
-        # Second store with updated evidence (same fingerprint = same file+category+title)
+        # Second store with updated evidence (same fingerprint = same file+category)
         finding_v2 = _make_finding(evidence="new evidence")
         review_v2 = _make_review(findings=[finding_v2])
         store.store_review(review_v2)

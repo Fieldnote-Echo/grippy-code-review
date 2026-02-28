@@ -113,10 +113,10 @@ class Finding(BaseModel):
     def fingerprint(self) -> str:
         """Deterministic 12-char hex hash for cross-round finding matching.
 
-        Uses file + category + title — stable across line number shifts,
-        severity re-ratings, and description rewrites.
+        Uses file + category — stable across line number shifts,
+        severity re-ratings, title rephrasing, and description rewrites.
         """
-        key = f"{self.file.strip()}:{self.category.value}:{self.title.strip().lower()}"
+        key = f"{self.file.strip()}:{self.category.value}"
         return hashlib.sha256(key.encode()).hexdigest()[:12]
 
 

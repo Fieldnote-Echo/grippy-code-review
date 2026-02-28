@@ -292,7 +292,7 @@ class TestFindingFingerprint:
     """Finding.fingerprint is a deterministic hash for cross-round matching."""
 
     def test_fingerprint_is_deterministic(self) -> None:
-        """Same file + category + title -> same fingerprint."""
+        """Same file + category -> same fingerprint."""
         f1 = Finding(
             **_minimal_finding(
                 id="F-001",
@@ -332,29 +332,17 @@ class TestFindingFingerprint:
         f2 = Finding(**_minimal_finding(category="logic"))
         assert f1.fingerprint != f2.fingerprint
 
-    def test_fingerprint_differs_for_different_titles(self) -> None:
-        """Different title -> different fingerprint."""
+    def test_fingerprint_stable_across_title_changes(self) -> None:
+        """Different title -> same fingerprint (title not in hash)."""
         f1 = Finding(**_minimal_finding(title="Title A"))
         f2 = Finding(**_minimal_finding(title="Title B"))
-        assert f1.fingerprint != f2.fingerprint
+        assert f1.fingerprint == f2.fingerprint
 
     def test_fingerprint_is_12_char_hex(self) -> None:
         """Fingerprint is a 12-character hex string."""
         f = Finding(**_minimal_finding())
         assert len(f.fingerprint) == 12
         assert all(c in "0123456789abcdef" for c in f.fingerprint)
-
-    def test_fingerprint_stable_across_whitespace(self) -> None:
-        """Trailing/leading whitespace in title doesn't change fingerprint."""
-        f1 = Finding(**_minimal_finding(title="SQL injection"))
-        f2 = Finding(**_minimal_finding(title="SQL injection "))
-        assert f1.fingerprint == f2.fingerprint
-
-    def test_fingerprint_stable_across_case(self) -> None:
-        """Title case doesn't change fingerprint."""
-        f1 = Finding(**_minimal_finding(title="SQL Injection"))
-        f2 = Finding(**_minimal_finding(title="sql injection"))
-        assert f1.fingerprint == f2.fingerprint
 
     def test_fingerprint_stable_across_category_enum(self) -> None:
         """Uses category.value (string), not enum repr."""
@@ -365,7 +353,7 @@ class TestFindingFingerprint:
         # And the key should use the value, not something like "FindingCategory.SECURITY"
         import hashlib
 
-        expected_key = f"{f1.file.strip()}:{f1.category.value}:{f1.title.strip().lower()}"
+        expected_key = f"{f1.file.strip()}:{f1.category.value}"
         expected_fp = hashlib.sha256(expected_key.encode()).hexdigest()[:12]
         assert f1.fingerprint == expected_fp
 
