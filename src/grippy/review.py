@@ -33,8 +33,8 @@ from grippy.graph import FindingStatus
 from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 
-# Max diff size sent to the LLM — ~200K chars ≈ 50K tokens (H2 fix)
-MAX_DIFF_CHARS = 200_000
+# Max diff size sent to the LLM — ~500K chars ≈ 125K tokens
+MAX_DIFF_CHARS = 500_000
 
 
 _ERROR_HINTS: dict[str, str] = {
@@ -285,7 +285,8 @@ def main() -> None:
     # H2: cap diff size to avoid overflowing LLM context
     original_len = len(diff)
     diff = truncate_diff(diff)
-    if len(diff) < original_len:
+    diff_truncated = len(diff) < original_len
+    if diff_truncated:
         print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
 
     # 4. Format context
@@ -388,6 +389,7 @@ def main() -> None:
             diff=diff,
             score=review.score.overall,
             verdict=review.verdict.status.value,
+            diff_truncated=diff_truncated,
         )
         print("  Done.")
     except Exception as exc:

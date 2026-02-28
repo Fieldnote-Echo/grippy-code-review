@@ -169,6 +169,7 @@ def format_summary_comment(
     off_diff_findings: list[Finding],
     head_sha: str,
     pr_number: int,
+    diff_truncated: bool = False,
 ) -> str:
     """Format the compact summary dashboard as an issue comment.
 
@@ -182,6 +183,7 @@ def format_summary_comment(
         off_diff_findings: Findings outside diff hunks (shown inline here).
         head_sha: Commit SHA for this review.
         pr_number: PR number for marker scoping.
+        diff_truncated: Whether the diff was truncated to fit context limits.
 
     Returns:
         Formatted markdown comment body.
@@ -197,6 +199,13 @@ def format_summary_comment(
     lines.append("")
     lines.append(f"**Score: {score}/100** | **Findings: {finding_count}**")
     lines.append("")
+
+    if diff_truncated:
+        lines.append(
+            "> \u26a0\ufe0f **Notice:** Diff was truncated to fit context limits."
+            " Some files may not have been reviewed."
+        )
+        lines.append("")
 
     # Delta section
     if new_count or persists_count or resolved_count:
@@ -313,6 +322,7 @@ def post_review(
     diff: str,
     score: int,
     verdict: str,
+    diff_truncated: bool = False,
 ) -> ResolutionResult:
     """Post Grippy review as inline comments + summary dashboard.
 
@@ -326,6 +336,7 @@ def post_review(
         diff: Full PR diff text.
         score: Overall review score.
         verdict: PASS, FAIL, or PROVISIONAL.
+        diff_truncated: Whether the diff was truncated to fit context limits.
 
     Returns:
         ResolutionResult for callers to update finding status in the store.
@@ -384,6 +395,7 @@ def post_review(
         off_diff_findings=off_diff,
         head_sha=head_sha,
         pr_number=pr_number,
+        diff_truncated=diff_truncated,
     )
 
     # Upsert: edit existing summary or create new
