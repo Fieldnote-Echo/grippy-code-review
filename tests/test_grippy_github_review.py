@@ -504,6 +504,69 @@ class TestPostReview:
         mock_pr.create_issue_comment.assert_called_once()
 
 
+# --- collect_resolved_thread_ids ---
+
+
+class TestCollectResolvedThreadIds:
+    """collect_resolved_thread_ids scans PR comments for resolved finding markers."""
+
+    def test_matches_resolved_fingerprints(self) -> None:
+        from grippy.github_review import collect_resolved_thread_ids
+
+        comment = MagicMock()
+        comment.body = "some text\n<!-- grippy-finding-aaa111bbb222 -->"
+        comment.node_id = "PRRT_thread_1"
+
+        resolved = [{"fingerprint": "aaa111bbb222", "node_id": "F:abc"}]
+        result = collect_resolved_thread_ids([comment], resolved)
+        assert result == ["PRRT_thread_1"]
+
+    def test_ignores_unresolved_fingerprints(self) -> None:
+        from grippy.github_review import collect_resolved_thread_ids
+
+        comment = MagicMock()
+        comment.body = "text\n<!-- grippy-finding-xxx999yyy888 -->"
+        comment.node_id = "PRRT_thread_2"
+
+        resolved = [{"fingerprint": "different12ch", "node_id": "F:abc"}]
+        result = collect_resolved_thread_ids([comment], resolved)
+        assert result == []
+
+    def test_no_comments_returns_empty(self) -> None:
+        from grippy.github_review import collect_resolved_thread_ids
+
+        resolved = [{"fingerprint": "aaa111bbb222", "node_id": "F:abc"}]
+        result = collect_resolved_thread_ids([], resolved)
+        assert result == []
+
+    def test_no_resolved_returns_empty(self) -> None:
+        from grippy.github_review import collect_resolved_thread_ids
+
+        comment = MagicMock()
+        comment.body = "text\n<!-- grippy-finding-aaa111bbb222 -->"
+        comment.node_id = "PRRT_thread_1"
+
+        result = collect_resolved_thread_ids([comment], [])
+        assert result == []
+
+    def test_multiple_resolved_multiple_threads(self) -> None:
+        from grippy.github_review import collect_resolved_thread_ids
+
+        c1 = MagicMock()
+        c1.body = "text\n<!-- grippy-finding-fp_aaa000000 -->"
+        c1.node_id = "PRRT_1"
+        c2 = MagicMock()
+        c2.body = "text\n<!-- grippy-finding-fp_bbb000000 -->"
+        c2.node_id = "PRRT_2"
+
+        resolved = [
+            {"fingerprint": "fp_aaa000000", "node_id": "F:1"},
+            {"fingerprint": "fp_bbb000000", "node_id": "F:2"},
+        ]
+        result = collect_resolved_thread_ids([c1, c2], resolved)
+        assert set(result) == {"PRRT_1", "PRRT_2"}
+
+
 # --- resolve_threads ---
 
 

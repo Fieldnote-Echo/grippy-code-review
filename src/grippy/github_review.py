@@ -11,6 +11,8 @@ from github import Github, GithubException
 
 from grippy.schema import Finding
 
+_FINDING_MARKER_RE = re.compile(r"<!-- grippy-finding-(\w+) -->")
+
 # --- Diff parser ---
 
 
@@ -410,6 +412,36 @@ def post_review(
 
 
 # --- Thread resolution ---
+
+
+def collect_resolved_thread_ids(
+    comments: list[Any],
+    resolved: list[dict[str, Any]],
+) -> list[str]:
+    """Match resolved findings to their GitHub review thread IDs.
+
+    Scans existing PR review comments for ``<!-- grippy-finding-{fp} -->``
+    markers and returns the thread node_id for each resolved fingerprint.
+
+    Args:
+        comments: PR review comments (from ``pr.get_review_comments()``).
+        resolved: Resolved finding dicts with 'fingerprint' key.
+
+    Returns:
+        List of GitHub review thread node IDs to resolve.
+    """
+    if not resolved or not comments:
+        return []
+
+    resolved_fps = {r["fingerprint"] for r in resolved}
+    thread_ids: list[str] = []
+
+    for comment in comments:
+        match = _FINDING_MARKER_RE.search(comment.body)
+        if match and match.group(1) in resolved_fps:
+            thread_ids.append(comment.node_id)
+
+    return thread_ids
 
 
 def resolve_threads(
