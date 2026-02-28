@@ -504,6 +504,25 @@ class TestIdempotency:
         assert row["created_at"] == original_created
         assert row["updated_at"] == "2026-02-01T00:00:00Z"
 
+    def test_vector_refresh_on_label_change(self, store: GrippyStore) -> None:
+        """Vectors are refreshed when node label/text changes."""
+        review_v1 = _make_review(findings=[_make_finding(title="Old title", evidence="old")])
+        store.store_review(review_v1)
+
+        nodes_v1 = store.get_all_nodes()
+        finding_nodes_v1 = [n for n in nodes_v1 if n["node_type"] == NodeType.FINDING.value]
+        assert len(finding_nodes_v1) == 1
+        text_v1 = finding_nodes_v1[0]["text"]
+
+        # Re-store with different title (same fingerprint = same node ID)
+        review_v2 = _make_review(findings=[_make_finding(title="New title", evidence="new")])
+        store.store_review(review_v2)
+
+        nodes_v2 = store.get_all_nodes()
+        finding_nodes_v2 = [n for n in nodes_v2 if n["node_type"] == NodeType.FINDING.value]
+        assert len(finding_nodes_v2) == 1
+        assert finding_nodes_v2[0]["text"] != text_v1
+
     def test_upsert_preserves_resolved_status(self, store: GrippyStore) -> None:
         """UPSERT preserves 'resolved' status — doesn't revert to 'open'."""
         review = _make_review()
