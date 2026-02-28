@@ -241,7 +241,9 @@ def main() -> None:
     except ValueError as exc:
         print(f"::error::Invalid configuration: {exc}")
         post_comment(
-            token, pr_event["repo"], pr_event["pr_number"],
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
             _failure_comment(pr_event["repo"], "CONFIG ERROR"),
         )
         sys.exit(1)
@@ -260,7 +262,9 @@ def main() -> None:
             )
         try:
             post_comment(
-                token, pr_event["repo"], pr_event["pr_number"],
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
                 _failure_comment(pr_event["repo"], "DIFF ERROR"),
             )
         except Exception:
@@ -295,7 +299,9 @@ def main() -> None:
         print(f"::error::Grippy review failed after {exc.attempts} attempts: {exc}")
         try:
             post_comment(
-                token, pr_event["repo"], pr_event["pr_number"],
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
                 _failure_comment(pr_event["repo"], "PARSE ERROR"),
             )
         except Exception:
@@ -305,7 +311,9 @@ def main() -> None:
         print(f"::error::Grippy review timed out: {exc}")
         try:
             post_comment(
-                token, pr_event["repo"], pr_event["pr_number"],
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
                 _failure_comment(pr_event["repo"], "TIMEOUT"),
             )
         except Exception:
@@ -315,7 +323,9 @@ def main() -> None:
         print(f"::error::Grippy agent failed: {exc}")
         try:
             post_comment(
-                token, pr_event["repo"], pr_event["pr_number"],
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
                 _failure_comment(pr_event["repo"], "ERROR"),
             )
         except Exception:
@@ -376,7 +386,9 @@ def main() -> None:
         print(f"::warning::Failed to post review: {exc}")
         try:
             post_comment(
-                token, pr_event["repo"], pr_event["pr_number"],
+                token,
+                pr_event["repo"],
+                pr_event["pr_number"],
                 _failure_comment(pr_event["repo"], "POST ERROR"),
             )
         except Exception:

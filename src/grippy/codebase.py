@@ -465,8 +465,7 @@ def _make_list_files(repo_root: Path) -> Any:
             resolved_root = repo_root.resolve()
             raw = sorted(target.glob(glob_pattern))
             entries = [
-                e for e in raw[:_MAX_GLOB_RESULTS]
-                if e.resolve().is_relative_to(resolved_root)
+                e for e in raw[:_MAX_GLOB_RESULTS] if e.resolve().is_relative_to(resolved_root)
             ]
         except (OSError, ValueError, RuntimeError) as e:
             return f"Error listing files: {e}"
