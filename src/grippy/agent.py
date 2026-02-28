@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Grippy agent factory — builds Agno agents for each review mode."""
 
 from __future__ import annotations

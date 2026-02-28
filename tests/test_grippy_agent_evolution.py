@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy agent evolution — new create_reviewer() parameters."""
 
 from __future__ import annotations

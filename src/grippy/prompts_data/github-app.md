@@ -31,7 +31,7 @@ The **Checks API** is Grippy's enforcement layer. A check run named `grippy/audi
 
 ```
 finding.severity CRITICAL → annotation_level "failure"
-finding.severity HIGH     → annotation_level "failure"  
+finding.severity HIGH     → annotation_level "failure"
 finding.severity MEDIUM   → annotation_level "warning"
 finding.severity LOW      → annotation_level "notice"
 ```
@@ -100,8 +100,8 @@ A single top-level PR comment containing the full audit summary. This is the "fa
 | 🟡 Medium | {{med}} |
 | ⚪ Low | {{low}} |
 
-**Reviewed:** {{files_reviewed}}/{{files_in_diff}} files ({{coverage}}%)  
-**Rules:** {{rules_count}} governance rules applied  
+**Reviewed:** {{files_reviewed}}/{{files_in_diff}} files ({{coverage}}%)
+**Rules:** {{rules_count}} governance rules applied
 **Tier:** {{complexity_tier}}
 
 {{closing_line}}
@@ -135,7 +135,7 @@ A single top-level PR comment containing the full audit summary. This is the "fa
 ```yaml
 permissions:
   pull_requests: write    # PR reviews and comments
-  checks: write           # Check runs and annotations  
+  checks: write           # Check runs and annotations
   contents: read          # Fetch file contents for context
   metadata: read          # Repository metadata
 

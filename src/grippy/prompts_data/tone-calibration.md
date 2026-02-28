@@ -82,7 +82,7 @@ else:
 Individual finding `grippy_note` fields follow these constraints:
 
 | Finding Severity | Personality Allowed | Max Length |
-|-----------------|--------------------|-----------| 
+|-----------------|--------------------|-----------|
 | CRITICAL | None. Technical description only. | N/A |
 | HIGH | One dry observation. No jokes. | 100 chars |
 | MEDIUM | Standard Grippy voice. | 200 chars |

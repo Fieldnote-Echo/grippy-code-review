@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Grippy CI review entry point — reads PR event, runs agent, posts comment.
 
 Usage (GitHub Actions):
@@ -279,7 +280,7 @@ def main() -> None:
                 _failure_comment(pr_event["repo"], "DIFF ERROR"),
             )
         except Exception:
-            pass  # Don't mask the original error
+            pass  # nosec B110 — best-effort, don't mask the original error
         sys.exit(1)
     file_count = diff.count("diff --git")
     print(f"  {file_count} files, {len(diff)} chars")
@@ -317,7 +318,7 @@ def main() -> None:
                 _failure_comment(pr_event["repo"], "PARSE ERROR"),
             )
         except Exception:
-            pass
+            pass  # nosec B110 — best-effort error posting
         sys.exit(1)
     except TimeoutError as exc:
         print(f"::error::Grippy review timed out: {exc}")
@@ -329,7 +330,7 @@ def main() -> None:
                 _failure_comment(pr_event["repo"], "TIMEOUT"),
             )
         except Exception:
-            pass
+            pass  # nosec B110 — best-effort error posting
         sys.exit(1)
     except Exception as exc:
         print(f"::error::Grippy agent failed: {exc}")
@@ -341,7 +342,7 @@ def main() -> None:
                 _failure_comment(pr_event["repo"], "ERROR"),
             )
         except Exception:
-            pass
+            pass  # nosec B110 — best-effort error posting
         sys.exit(1)
 
     # Override self-reported model — LLMs hallucinate their own model name
@@ -376,7 +377,7 @@ def main() -> None:
                 _failure_comment(pr_event["repo"], "POST ERROR"),
             )
         except Exception:
-            pass  # Don't mask the original error
+            pass  # nosec B110 — best-effort error posting
 
     # 7. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")

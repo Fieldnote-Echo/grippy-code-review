@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """GitHub PR Review API integration — inline comments, resolution, summaries.
 
 Finding lifecycle is owned by GitHub: fetch existing comments, compare,
@@ -231,7 +232,7 @@ def format_summary_comment(
         Formatted markdown comment body.
     """
     status_emoji = {
-        "PASS": "\u2705",
+        "PASS": "\u2705",  # nosec B105
         "FAIL": "\u274c",
         "PROVISIONAL": "\u26a0\ufe0f",
     }.get(verdict, "\U0001f50d")

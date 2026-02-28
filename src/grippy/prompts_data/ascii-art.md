@@ -92,7 +92,7 @@ A critical review is not the time for a mascot. The findings are sufficient.)*
     │  {{disguise_reveal_line}}            │
     │                                      │
     ╰──────────────────────────────────────╯
-         \    ╭━━━╮ 
+         \    ╭━━━╮
           \   │°  °│  ← "It's me."
               │ ╭╮ │
               ╰━┳━━╯
@@ -110,12 +110,12 @@ characters for maximum terminal compatibility.
 ### CLI Startup Banner
 
 ```
-  ____      _                       
- / ___|_ __(_)_ __  _ __  _   _    
-| |  _| '__| | '_ \| '_ \| | | |   
-| |_| | |  | | |_) | |_) | |_| |   
- \____|_|  |_| .__/| .__/ \__, |   
-             |_|   |_|    |___/    
+  ____      _
+ / ___|_ __(_)_ __  _ __  _   _
+| |  _| '__| | '_ \| '_ \| | | |
+| |_| | |  | | |_) | |_) | |_| |
+ \____|_|  |_| .__/| .__/ \__, |
+             |_|   |_|    |___/
 
   Code Auditor v{{version}}
   "I didn't ask for this."

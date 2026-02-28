@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy CI review entry point — reads PR, runs agent, posts comment."""
 
 from __future__ import annotations

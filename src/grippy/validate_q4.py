@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Validation script — test whether Devstral Q4 holds Grippy's structured JSON output.
 
 Usage:

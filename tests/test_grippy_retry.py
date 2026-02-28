@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy structured output retry wrapper."""
 
 from __future__ import annotations

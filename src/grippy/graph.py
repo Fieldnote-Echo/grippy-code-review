@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Graph enums for Grippy's codebase knowledge graph.
 
 Provides node/edge type enums for the graph persistence layer.

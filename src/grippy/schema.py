@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Pydantic models mapping Grippy's output-schema.md to typed Python objects."""
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ class EscalationTarget(StrEnum):
 
 
 class VerdictStatus(StrEnum):
-    PASS = "PASS"
+    PASS = "PASS"  # nosec B105
     FAIL = "FAIL"
     PROVISIONAL = "PROVISIONAL"
 

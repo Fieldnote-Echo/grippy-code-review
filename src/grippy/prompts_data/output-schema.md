@@ -17,14 +17,14 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
   "audit_type": "pr_review | security_audit | governance_check | surprise_audit",
   "timestamp": "ISO-8601",
   "model": "model identifier used for this review",
-  
+
   "pr": {
     "title": "string",
     "author": "string",
     "branch": "source → target",
     "complexity_tier": "TRIVIAL | STANDARD | COMPLEX | CRITICAL"
   },
-  
+
   "scope": {
     "files_in_diff": 0,
     "files_reviewed": 0,
@@ -32,7 +32,7 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
     "governance_rules_applied": ["rule-id-1", "rule-id-2"],
     "modes_active": ["pr_review", "security_audit"]
   },
-  
+
   "findings": [
     {
       "id": "F-001",
@@ -50,7 +50,7 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
       "grippy_note": "Personality-appropriate comment for this finding (selected by tone-calibration)"
     }
   ],
-  
+
   "escalations": [
     {
       "id": "E-001",
@@ -62,7 +62,7 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
       "blocking": true
     }
   ],
-  
+
   "score": {
     "overall": 0,
     "breakdown": {
@@ -80,14 +80,14 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
       "total_deduction": 0
     }
   },
-  
+
   "verdict": {
     "status": "PASS | FAIL | PROVISIONAL",
     "threshold_applied": 0,
     "merge_blocking": true,
     "summary": "One-sentence Grippy assessment"
   },
-  
+
   "personality": {
     "tone_register": "grudging_respect | mild | grumpy | disappointed | frustrated | alarmed | professional",
     "opening_catchphrase": "string (from catchphrases.md)",
@@ -95,7 +95,7 @@ You MUST produce a single JSON object conforming to this schema. No markdown wra
     "disguise_used": "string or null (only for surprise audits)",
     "ascii_art_key": "all_clear | standard | warning | critical | surprise"
   },
-  
+
   "meta": {
     "review_duration_ms": 0,
     "tokens_used": 0,

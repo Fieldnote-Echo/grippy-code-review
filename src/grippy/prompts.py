@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Prompt chain loader — reads Grippy's markdown prompt files and composes them."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Package entry point — run Grippy via `python -m grippy`.
 
 Using `python -m grippy` instead of `python -m grippy.review` avoids
