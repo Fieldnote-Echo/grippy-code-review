@@ -995,7 +995,7 @@ class TestMainPostReviewFailure:
 
         mock_post_comment.assert_called_once()
         body = mock_post_comment.call_args[0][3]
-        assert "failed to post inline comments" in body.lower() or "failed to post" in body.lower()
+        assert "post error" in body.lower()
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.post_review")

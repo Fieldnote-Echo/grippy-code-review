@@ -37,6 +37,16 @@ from grippy.retry import ReviewParseError, run_review
 MAX_DIFF_CHARS = 200_000
 
 
+def _failure_comment(repo: str, error_type: str) -> str:
+    """Build a generic error comment for posting to a PR."""
+    return (
+        f"## \u274c Grippy Review \u2014 {error_type}\n\n"
+        "Review failed. Check the "
+        f"[Actions log](https://github.com/{repo}/actions) for details.\n\n"
+        "<!-- grippy-error -->"
+    )
+
+
 def load_pr_event(event_path: Path) -> dict[str, Any]:
     """Parse GitHub Actions pull_request event payload.
 
@@ -230,14 +240,10 @@ def main() -> None:
         )
     except ValueError as exc:
         print(f"::error::Invalid configuration: {exc}")
-        error_body = (
-            "## \u274c Grippy Review \u2014 CONFIG ERROR\n\n"
-            "Review failed. Check the "
-            "[Actions log](https://github.com/"
-            f"{pr_event['repo']}/actions) for details.\n\n"
-            "<!-- grippy-error -->"
+        post_comment(
+            token, pr_event["repo"], pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
         )
-        post_comment(token, pr_event["repo"], pr_event["pr_number"], error_body)
         sys.exit(1)
 
     # 3. Fetch diff (M2: graceful 403 handling for fork PRs)
@@ -253,14 +259,10 @@ def main() -> None:
                 "the token has read access to the fork."
             )
         try:
-            failure_body = (
-                "## \u274c Grippy Review \u2014 DIFF ERROR\n\n"
-                "Review failed. Check the "
-                "[Actions log](https://github.com/"
-                f"{pr_event['repo']}/actions) for details.\n\n"
-                "<!-- grippy-error -->"
+            post_comment(
+                token, pr_event["repo"], pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "DIFF ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass  # Don't mask the original error
         sys.exit(1)
@@ -292,42 +294,30 @@ def main() -> None:
     except ReviewParseError as exc:
         print(f"::error::Grippy review failed after {exc.attempts} attempts: {exc}")
         try:
-            failure_body = (
-                "## \u274c Grippy Review \u2014 PARSE ERROR\n\n"
-                "Review failed. Check the "
-                "[Actions log](https://github.com/"
-                f"{pr_event['repo']}/actions) for details.\n\n"
-                "<!-- grippy-error -->"
+            post_comment(
+                token, pr_event["repo"], pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "PARSE ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
     except TimeoutError as exc:
         print(f"::error::Grippy review timed out: {exc}")
         try:
-            failure_body = (
-                "## \u274c Grippy Review \u2014 TIMEOUT\n\n"
-                "Review failed. Check the "
-                "[Actions log](https://github.com/"
-                f"{pr_event['repo']}/actions) for details.\n\n"
-                "<!-- grippy-error -->"
+            post_comment(
+                token, pr_event["repo"], pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "TIMEOUT"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
     except Exception as exc:
         print(f"::error::Grippy agent failed: {exc}")
         try:
-            failure_body = (
-                "## \u274c Grippy Review \u2014 ERROR\n\n"
-                "Review failed. Check the "
-                "[Actions log](https://github.com/"
-                f"{pr_event['repo']}/actions) for details.\n\n"
-                "<!-- grippy-error -->"
+            post_comment(
+                token, pr_event["repo"], pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "ERROR"),
             )
-            post_comment(token, pr_event["repo"], pr_event["pr_number"], failure_body)
         except Exception:
             pass
         sys.exit(1)
@@ -386,15 +376,8 @@ def main() -> None:
         print(f"::warning::Failed to post review: {exc}")
         try:
             post_comment(
-                token,
-                pr_event["repo"],
-                pr_event["pr_number"],
-                "## Grippy Review\n\n"
-                "Review completed (score posted to Actions log) but failed to "
-                "post inline comments. Check the "
-                "[Actions log](https://github.com/"
-                f"{pr_event['repo']}/actions) for details.\n\n"
-                "<!-- grippy-error -->",
+                token, pr_event["repo"], pr_event["pr_number"],
+                _failure_comment(pr_event["repo"], "POST ERROR"),
             )
         except Exception:
             pass  # Don't mask the original error
