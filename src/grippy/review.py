@@ -400,7 +400,7 @@ def main() -> None:
         except Exception as exc:
             print(f"::warning::Failed to update finding status: {exc}")
 
-    # 8. Set outputs for GitHub Actions
+    # 9. Set outputs for GitHub Actions
     github_output = os.environ.get("GITHUB_OUTPUT", "")
     if github_output:
         with open(github_output, "a") as f:
