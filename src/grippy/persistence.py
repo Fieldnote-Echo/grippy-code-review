@@ -167,9 +167,12 @@ class GrippyStore:
         """Open existing nodes table if present."""
         if self._nodes_table is not None:
             return self._nodes_table
-        existing_tables = self._lance_db.list_tables()
-        if "nodes" in existing_tables:
+        try:
             self._nodes_table = self._lance_db.open_table("nodes")
+        except (FileNotFoundError, ValueError):
+            # FileNotFoundError: table directory doesn't exist on disk
+            # ValueError: LanceDB metadata references a missing/corrupt table
+            pass
         return self._nodes_table
 
     # --- Store ---
@@ -396,19 +399,30 @@ class GrippyStore:
 
         table = self._ensure_nodes_table()
         if table is None:
-            try:
-                self._nodes_table = self._lance_db.create_table("nodes", data=records)
-            except OSError:
-                # Table exists on disk but wasn't visible to list_tables()
-                # (stale cache metadata). Fall back to open + add.
-                self._nodes_table = self._lance_db.open_table("nodes")
-                self._nodes_table.add(records)
+            self._nodes_table = self._lance_db.create_table("nodes", data=records)
         else:
             arrow_tbl = table.to_arrow()
-            existing_ids = set(arrow_tbl.column("node_id").to_pylist())
-            new_records = [r for r in records if r["node_id"] not in existing_ids]
-            if new_records:
-                table.add(new_records)
+            existing = dict(
+                zip(
+                    arrow_tbl.column("node_id").to_pylist(),
+                    arrow_tbl.column("text").to_pylist(),
+                    strict=True,
+                )
+            )
+            stale_ids = {
+                r["node_id"]
+                for r in records
+                if r["node_id"] in existing and existing[r["node_id"]] != r["text"]
+            }
+            if stale_ids:
+                # node_ids are deterministic hex hashes from _record_id() — safe to interpolate
+                id_list = ", ".join(f"'{nid}'" for nid in stale_ids)
+                table.delete(f"node_id IN ({id_list})")
+            upsert_records = [
+                r for r in records if r["node_id"] not in existing or r["node_id"] in stale_ids
+            ]
+            if upsert_records:
+                table.add(upsert_records)
 
     # --- Node queries ---
 

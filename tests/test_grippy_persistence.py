@@ -260,6 +260,23 @@ class TestGrippyStoreInit:
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='node_meta'")
         assert cur.fetchone() is None
 
+    def test_lance_table_found_without_list_tables(self, tmp_path: Path) -> None:
+        """LanceDB table is found even when list_tables() returns stale results."""
+        store = GrippyStore(
+            graph_db_path=tmp_path / "test.db",
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+        review = _make_review()
+        store.store_review(review)
+
+        # Simulate stale list_tables by clearing the cached reference
+        store._nodes_table = None
+
+        # Should still find and use the existing table (not crash)
+        nodes = store.get_all_nodes()
+        assert len(nodes) > 0
+
     def test_v2_schema_not_dropped(self, tmp_path: Path) -> None:
         """Opening a DB that already has v2 schema preserves existing data."""
         db_path = tmp_path / "grippy-graph.db"
