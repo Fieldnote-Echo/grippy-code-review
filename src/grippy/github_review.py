@@ -350,6 +350,10 @@ def post_review(
     # Resolve findings against prior round
     resolution = resolve_findings_against_prior(findings, prior_findings)
 
+    # Only post inline comments for NEW findings — persisting ones already have threads
+    persisting_fps = {pf.finding.fingerprint for pf in resolution.persisting}
+    new_findings = [f for f in findings if f.fingerprint not in persisting_fps]
+
     # Detect fork PR — GITHUB_TOKEN is read-only for forks
     is_fork = (
         pr.head.repo is not None
@@ -359,11 +363,11 @@ def post_review(
 
     # Parse diff and classify
     diff_lines = parse_diff_lines(diff)
-    inline, off_diff = classify_findings(findings, diff_lines)
+    inline, off_diff = classify_findings(new_findings, diff_lines)
 
     # For fork PRs, skip inline comments — put everything in summary
     if is_fork:
-        off_diff = findings
+        off_diff = new_findings
         inline = []
 
     # Post inline review comments (batched, with 422 fallback)
@@ -390,7 +394,7 @@ def post_review(
     summary = format_summary_comment(
         score=score,
         verdict=verdict,
-        finding_count=len(findings),
+        finding_count=len(new_findings),
         new_count=len(resolution.new),
         persists_count=len(resolution.persisting),
         resolved_count=len(resolution.resolved),
@@ -399,6 +403,19 @@ def post_review(
         pr_number=pr_number,
         diff_truncated=diff_truncated,
     )
+
+    # Resolve threads for fixed findings (non-fatal)
+    if resolution.resolved:
+        try:
+            review_comments = list(pr.get_review_comments())
+            thread_ids = collect_resolved_thread_ids(review_comments, resolution.resolved)
+            if thread_ids:
+                resolved_count = resolve_threads(
+                    repo=repo, pr_number=pr_number, thread_ids=thread_ids
+                )
+                print(f"  Resolved {resolved_count}/{len(thread_ids)} threads")
+        except Exception as exc:
+            print(f"::warning::Thread resolution failed: {exc}")
 
     # Upsert: edit existing summary or create new
     marker = f"<!-- grippy-summary-{pr_number} -->"

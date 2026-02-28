@@ -864,3 +864,115 @@ class TestPostReview422Fallback:
                 score=80,
                 verdict="PASS",
             )
+
+
+# --- post_review dedup (Task 3: skip persisting, wire thread resolution) ---
+
+
+class TestPostReviewDedup:
+    """post_review skips inline comments for persisting findings."""
+
+    @patch("grippy.github_review.Github")
+    def test_persisting_findings_not_reposted(self, mock_github_cls: MagicMock) -> None:
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        finding = _make_finding(file="src/app.py", line_start=9)
+        prior = [{"fingerprint": finding.fingerprint, "title": "old", "node_id": "F:old"}]
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new_line\n line2\n"
+        )
+
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[finding],
+            prior_findings=prior,
+            head_sha="abc123",
+            diff=diff,
+            score=80,
+            verdict="PASS",
+        )
+
+        mock_pr.create_review.assert_not_called()
+
+    @patch("grippy.github_review.Github")
+    def test_new_findings_still_posted(self, mock_github_cls: MagicMock) -> None:
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        diff = (
+            "diff --git a/src/app.py b/src/app.py\n"
+            "--- a/src/app.py\n+++ b/src/app.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new_line\n line2\n"
+        )
+
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[_make_finding(file="src/app.py", line_start=9)],
+            prior_findings=[],
+            head_sha="abc123",
+            diff=diff,
+            score=80,
+            verdict="PASS",
+        )
+
+        mock_pr.create_review.assert_called_once()
+
+    @patch("grippy.github_review.Github")
+    def test_scoreboard_shows_new_count(self, mock_github_cls: MagicMock) -> None:
+        from grippy.github_review import post_review
+
+        mock_pr = MagicMock()
+        mock_github_cls.return_value.get_repo.return_value.get_pull.return_value = mock_pr
+        mock_pr.get_issue_comments.return_value = []
+        mock_pr.get_review_comments.return_value = []
+        mock_pr.head.repo.full_name = "org/repo"
+        mock_pr.base.repo.full_name = "org/repo"
+
+        # Two findings in different files but same category — they'll have different fingerprints
+        f1 = _make_finding(file="src/a.py", line_start=9, title="New bug")
+        f2 = _make_finding(file="src/b.py", line_start=9, title="Old bug")
+        prior = [{"fingerprint": f2.fingerprint, "title": "Old bug", "node_id": "F:old"}]
+
+        diff = (
+            "diff --git a/src/a.py b/src/a.py\n"
+            "--- a/src/a.py\n+++ b/src/a.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new\n line2\n"
+            "diff --git a/src/b.py b/src/b.py\n"
+            "--- a/src/b.py\n+++ b/src/b.py\n"
+            "@@ -8,3 +8,4 @@\n line\n+new\n line2\n"
+        )
+
+        post_review(
+            token="test-token",
+            repo="org/repo",
+            pr_number=1,
+            findings=[f1, f2],
+            prior_findings=prior,
+            head_sha="abc123",
+            diff=diff,
+            score=70,
+            verdict="PASS",
+        )
+
+        body = mock_pr.create_issue_comment.call_args[0][0]
+        assert "Findings: 1" in body
