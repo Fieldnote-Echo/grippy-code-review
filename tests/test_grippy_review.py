@@ -356,6 +356,7 @@ class TestMainWiringNewAPI:
         monkeypatch.setenv("GITHUB_TOKEN", "test-token")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
 
         from grippy.review import main
 
@@ -389,6 +390,7 @@ class TestMainWiringNewAPI:
         monkeypatch.setenv("GITHUB_TOKEN", "test-token")
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
 
         from grippy.review import main
 
@@ -529,6 +531,7 @@ class TestMainOrchestration:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
 
     @patch("grippy.review.post_review")
     @patch("grippy.review.run_review")
@@ -782,6 +785,7 @@ class TestMainReviewIntegration:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
         monkeypatch.setenv("GRIPPY_TRANSPORT", "local")
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
         monkeypatch.setattr(
             "grippy.review.__file__",
             str(tmp_path / "fake" / "grippy" / "review.py"),
@@ -836,6 +840,7 @@ class TestMainPostReviewFailure:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
         monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
 
     @patch("grippy.review.post_comment")
     @patch("grippy.review.post_review")
@@ -958,6 +963,7 @@ class TestTransportErrorUX:
         monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_file))
         monkeypatch.setenv("GRIPPY_TRANSPORT", "invalid-transport")
         monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
         monkeypatch.setattr(
             "grippy.review.__file__",
             str(tmp_path / "fake" / "grippy" / "review.py"),
