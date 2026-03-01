@@ -726,6 +726,80 @@ class TestMainOrchestration:
         assert call_kwargs["model_id"] == "devstral-small-2-24b-instruct-2512"
         assert call_kwargs["transport"] is None
 
+    @patch("grippy.review.create_embedder")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_api_key_env_passed_to_reviewer_and_embedder(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post_review: MagicMock,
+        mock_create_embedder: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """GRIPPY_API_KEY env var is read and passed to create_reviewer() and create_embedder()."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+        monkeypatch.setenv("GRIPPY_API_KEY", "my-custom-key")
+        monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+
+        # Mock lancedb + CodebaseIndex so the workspace branch runs
+        with (
+            patch("grippy.review.CodebaseIndex", create=True) as mock_cb_cls,
+            patch("grippy.review.CodebaseToolkit", create=True),
+            patch("lancedb.connect"),
+        ):
+            mock_cb_index = MagicMock()
+            mock_cb_index.is_indexed = True
+            mock_cb_cls.return_value = mock_cb_index
+
+            from grippy.review import main
+
+            main()
+
+        # Verify api_key passed to create_reviewer
+        reviewer_kwargs = mock_create.call_args[1]
+        assert reviewer_kwargs["api_key"] == "my-custom-key"
+
+        # Verify api_key passed to create_embedder
+        embedder_kwargs = mock_create_embedder.call_args[1]
+        assert embedder_kwargs["api_key"] == "my-custom-key"
+
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_api_key_defaults_to_lm_studio(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post_review: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When GRIPPY_API_KEY is unset, api_key defaults to 'lm-studio'."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+        monkeypatch.delenv("GRIPPY_API_KEY", raising=False)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+
+        from grippy.review import main
+
+        main()
+
+        reviewer_kwargs = mock_create.call_args[1]
+        assert reviewer_kwargs["api_key"] == "lm-studio"
+
     @patch("grippy.review.post_review")
     @patch("grippy.review.run_review")
     @patch("grippy.review.create_reviewer")

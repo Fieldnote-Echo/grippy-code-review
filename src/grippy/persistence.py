@@ -12,6 +12,7 @@ for idempotent writes, single-pass SQL joins for graph traversals.
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -19,6 +20,10 @@ from typing import Any, Protocol, runtime_checkable
 import lancedb  # type: ignore[import-untyped]
 
 from grippy.graph import NodeType
+
+# --- Node ID validation ---
+# Matches the deterministic format produced by _record_id(): "TYPE:hexhash"
+_NODE_ID_RE = re.compile(r"^[A-Z]+:[a-f0-9]{12}$")
 
 # --- Types ---
 
@@ -288,7 +293,11 @@ class GrippyStore:
                 if r["node_id"] in existing and existing[r["node_id"]] != r["text"]
             }
             if stale_ids:
-                # node_ids are deterministic hex hashes from _record_id() — safe to interpolate
+                bad_ids = {nid for nid in stale_ids if not _NODE_ID_RE.match(nid)}
+                if bad_ids:
+                    raise ValueError(
+                        f"Invalid node_id(s) blocked before LanceDB delete: {sorted(bad_ids)}"
+                    )
                 id_list = ", ".join(f"'{nid}'" for nid in stale_ids)
                 table.delete(f"node_id IN ({id_list})")
             upsert_records = [

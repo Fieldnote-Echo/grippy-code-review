@@ -807,3 +807,153 @@ class TestResolveThreadsGraphQLVariables:
         assert malicious_id not in query_args[0]
         thread_args = [a for a in cmd if a.startswith("threadId=")]
         assert thread_args[0] == f"threadId={malicious_id}"
+
+
+# --- Comment sanitization ---
+
+
+class TestCommentSanitization:
+    """LLM output must be sanitized before posting to GitHub comments."""
+
+    def test_script_tag_stripped_from_inline_comment(self) -> None:
+        """<script> tags in finding description are stripped from review comment body."""
+        from grippy.github_review import build_review_comment
+
+        finding = _make_finding()
+        # Rebuild with malicious description — Finding is frozen, so create fresh
+        finding = Finding(
+            id="F-001",
+            severity="HIGH",
+            confidence=90,
+            category="security",
+            file="src/app.py",
+            line_start=10,
+            line_end=15,
+            title="XSS <script>alert('title')</script> risk",
+            description="Vuln here <script>alert(1)</script> in code.",
+            suggestion="Fix <script>alert('sug')</script> this.",
+            evidence="evidence here",
+            grippy_note="<script>alert('note')</script> Grippy says.",
+        )
+        comment = build_review_comment(finding)
+        body = comment["body"]
+        assert "<script>" not in body
+        assert "alert(1)" not in body
+        assert "alert('title')" not in body
+        assert "alert('sug')" not in body
+        assert "alert('note')" not in body
+
+    def test_iframe_tag_stripped(self) -> None:
+        from grippy.github_review import build_review_comment
+
+        finding = Finding(
+            id="F-001",
+            severity="HIGH",
+            confidence=90,
+            category="security",
+            file="src/app.py",
+            line_start=10,
+            line_end=15,
+            title="Test finding",
+            description='Check <iframe src="https://evil.com"></iframe> this.',
+            suggestion="Fix this.",
+            evidence="evidence",
+            grippy_note="Grippy note.",
+        )
+        comment = build_review_comment(finding)
+        assert "<iframe" not in comment["body"]
+
+    def test_event_handler_stripped(self) -> None:
+        from grippy.github_review import build_review_comment
+
+        finding = Finding(
+            id="F-001",
+            severity="HIGH",
+            confidence=90,
+            category="security",
+            file="src/app.py",
+            line_start=10,
+            line_end=15,
+            title="Test finding",
+            description='<img onerror="alert(1)" src="x">',
+            suggestion="Fix this.",
+            evidence="evidence",
+            grippy_note="Grippy note.",
+        )
+        comment = build_review_comment(finding)
+        assert "onerror" not in comment["body"]
+
+    def test_javascript_scheme_stripped(self) -> None:
+        from grippy.github_review import build_review_comment
+
+        finding = Finding(
+            id="F-001",
+            severity="HIGH",
+            confidence=90,
+            category="security",
+            file="src/app.py",
+            line_start=10,
+            line_end=15,
+            title="Test finding",
+            description="Click [here](javascript:alert(1)) for details.",
+            suggestion="Fix this.",
+            evidence="evidence",
+            grippy_note="Grippy note.",
+        )
+        comment = build_review_comment(finding)
+        assert "javascript:" not in comment["body"]
+
+    def test_sanitization_applied_in_summary_off_diff(self) -> None:
+        """Off-diff findings in format_summary_comment are also sanitized."""
+        from grippy.github_review import format_summary_comment
+
+        finding = Finding(
+            id="F-001",
+            severity="HIGH",
+            confidence=90,
+            category="security",
+            file="src/app.py",
+            line_start=10,
+            line_end=15,
+            title="<script>alert('t')</script> Bad title",
+            description="<script>alert('d')</script> Bad desc.",
+            suggestion="<script>alert('s')</script> Bad suggestion.",
+            evidence="evidence",
+            grippy_note="Grippy note.",
+        )
+        result = format_summary_comment(
+            score=70,
+            verdict="FAIL",
+            finding_count=1,
+            new_count=1,
+            resolved_count=0,
+            off_diff_findings=[finding],
+            head_sha="abc123",
+            pr_number=6,
+        )
+        assert "<script>" not in result
+        assert "alert('t')" not in result
+        assert "alert('d')" not in result
+        assert "alert('s')" not in result
+
+    def test_sanitize_preserves_safe_content(self) -> None:
+        """Sanitization does not mangle safe markdown content."""
+        from grippy.github_review import _sanitize_comment_text
+
+        safe = "Use `parameterized_query()` instead of **string concat**."
+        assert _sanitize_comment_text(safe) == safe
+
+    def test_data_scheme_stripped(self) -> None:
+        from grippy.github_review import _sanitize_comment_text
+
+        text = "See data:text/html,<h1>pwned</h1>"
+        result = _sanitize_comment_text(text)
+        assert "data:" not in result
+
+    def test_case_insensitive_stripping(self) -> None:
+        from grippy.github_review import _sanitize_comment_text
+
+        text = "<SCRIPT>alert(1)</SCRIPT>"
+        result = _sanitize_comment_text(text)
+        assert "<SCRIPT>" not in result
+        assert "<script>" not in result.lower()

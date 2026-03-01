@@ -44,12 +44,14 @@ jobs:
         run: uv sync
 
       - name: Run tests
+        env:
+          EXTRA_ARGS: ${{ matrix.python-version == '3.12' && '--cov-report=xml --junitxml=test-results.xml' || '' }}
         run: |
           uv run pytest tests/ -v \
             --cov=src/grippy \
             --cov-report=term-missing \
             --cov-fail-under=80 \
-            ${{ matrix.python-version == '3.12' && '--cov-report=xml --junitxml=test-results.xml' || '' }}
+            $EXTRA_ARGS
 
       - name: Upload test artifacts
         if: matrix.python-version == '3.12'

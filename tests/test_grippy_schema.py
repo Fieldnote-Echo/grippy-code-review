@@ -175,6 +175,38 @@ class TestFindingConstraints:
         f = Finding(**_minimal_finding(grippy_note=note_280))
         assert len(f.grippy_note) == 280
 
+    def test_title_max_length_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="title"):
+            Finding(**_minimal_finding(title="x" * 281))
+
+    def test_title_at_max_length_accepted(self) -> None:
+        f = Finding(**_minimal_finding(title="x" * 280))
+        assert len(f.title) == 280
+
+    def test_description_max_length_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="description"):
+            Finding(**_minimal_finding(description="x" * 2001))
+
+    def test_description_at_max_length_accepted(self) -> None:
+        f = Finding(**_minimal_finding(description="x" * 2000))
+        assert len(f.description) == 2000
+
+    def test_suggestion_max_length_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="suggestion"):
+            Finding(**_minimal_finding(suggestion="x" * 1001))
+
+    def test_suggestion_at_max_length_accepted(self) -> None:
+        f = Finding(**_minimal_finding(suggestion="x" * 1000))
+        assert len(f.suggestion) == 1000
+
+    def test_evidence_max_length_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="evidence"):
+            Finding(**_minimal_finding(evidence="x" * 1001))
+
+    def test_evidence_at_max_length_accepted(self) -> None:
+        f = Finding(**_minimal_finding(evidence="x" * 1000))
+        assert len(f.evidence) == 1000
+
 
 # --- Optional field tests ---
 

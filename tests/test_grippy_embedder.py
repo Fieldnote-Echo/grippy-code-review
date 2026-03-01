@@ -42,6 +42,31 @@ class TestCreateEmbedder:
         )
         assert embedder.api_key == "lm-studio"
 
+    def test_local_transport_uses_custom_api_key(self) -> None:
+        """Custom api_key is passed through to the embedder (C2 fix)."""
+        from grippy.embedder import create_embedder
+
+        embedder = create_embedder(
+            transport="local",
+            model="test-model",
+            base_url="http://localhost:1234/v1",
+            api_key="my-secret-key",
+        )
+        assert embedder.api_key == "my-secret-key"
+
+    def test_openai_transport_ignores_api_key(self) -> None:
+        """OpenAI transport does not use the api_key parameter."""
+        from grippy.embedder import create_embedder
+
+        embedder = create_embedder(
+            transport="openai",
+            model="text-embedding-3-large",
+            base_url="http://ignored",
+            api_key="should-be-ignored",
+        )
+        # OpenAI embedder reads OPENAI_API_KEY from env, not api_key param
+        assert isinstance(embedder, OpenAIEmbedder)
+
     def test_openai_transport_does_not_set_base_url(self) -> None:
         """OpenAI transport uses default base URL."""
         from grippy.embedder import create_embedder

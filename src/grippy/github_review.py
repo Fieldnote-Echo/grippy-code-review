@@ -119,6 +119,43 @@ def classify_findings(
     return inline, off_diff
 
 
+# --- Output sanitization ---
+
+# Patterns for dangerous HTML/markdown that could appear in LLM output
+_DANGEROUS_TAGS_RE = re.compile(
+    r"<\s*(?:script|iframe|object|embed|form)\b[^>]*>.*?</\s*(?:script|iframe|object|embed|form)"
+    r"\s*>|<\s*(?:script|iframe|object|embed|form)\b[^>]*/?\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_EVENT_HANDLER_RE = re.compile(
+    r"\bon\w+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)",
+    re.IGNORECASE,
+)
+_DANGEROUS_SCHEME_RE = re.compile(
+    r"(?:javascript|data|vbscript)\s*:",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_comment_text(text: str) -> str:
+    """Strip dangerous HTML tags, event handlers, and URL schemes from text.
+
+    LLM-generated free-text fields are posted to GitHub PR comments. A prompt
+    injection could cause the model to emit malicious markdown/HTML. This
+    function neutralizes known dangerous patterns before posting.
+
+    Args:
+        text: Raw text from an LLM-generated field.
+
+    Returns:
+        Cleaned text with dangerous content stripped.
+    """
+    text = _DANGEROUS_TAGS_RE.sub("", text)
+    text = _EVENT_HANDLER_RE.sub("", text)
+    text = _DANGEROUS_SCHEME_RE.sub("", text)
+    return text
+
+
 # --- Inline comment builder ---
 
 _SEVERITY_EMOJI = {
@@ -147,15 +184,19 @@ def build_review_comment(finding: Finding) -> dict[str, str | int]:
         Dict with keys: path, body, line, side.
     """
     emoji = _SEVERITY_EMOJI.get(finding.severity.value, "\u26aa")
+    title = _sanitize_comment_text(finding.title)
+    description = _sanitize_comment_text(finding.description)
+    suggestion = _sanitize_comment_text(finding.suggestion)
+    grippy_note = _sanitize_comment_text(finding.grippy_note)
     body_lines = [
-        f"#### {emoji} {finding.severity.value}: {finding.title}",
+        f"#### {emoji} {finding.severity.value}: {title}",
         f"Confidence: {finding.confidence}%",
         "",
-        finding.description,
+        description,
         "",
-        f"**Suggestion:** {finding.suggestion}",
+        f"**Suggestion:** {suggestion}",
         "",
-        f"*\u2014 {finding.grippy_note}*",
+        f"*\u2014 {grippy_note}*",
         "",
         _finding_marker(finding),
     ]
@@ -267,12 +308,15 @@ def format_summary_comment(
         lines.append("")
         for f in off_diff_findings:
             sev_emoji = _SEVERITY_EMOJI.get(f.severity.value, "\u26aa")
-            lines.append(f"#### {sev_emoji} {f.severity.value}: {f.title}")
+            f_title = _sanitize_comment_text(f.title)
+            f_description = _sanitize_comment_text(f.description)
+            f_suggestion = _sanitize_comment_text(f.suggestion)
+            lines.append(f"#### {sev_emoji} {f.severity.value}: {f_title}")
             lines.append(f"\U0001f4c1 `{f.file}:{f.line_start}`")
             lines.append("")
-            lines.append(f.description)
+            lines.append(f_description)
             lines.append("")
-            lines.append(f"**Suggestion:** {f.suggestion}")
+            lines.append(f"**Suggestion:** {f_suggestion}")
             lines.append("")
         lines.append("</details>")
         lines.append("")
