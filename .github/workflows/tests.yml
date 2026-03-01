@@ -54,7 +54,7 @@ jobs:
             $EXTRA_ARGS
 
       - name: Upload test artifacts
-        if: matrix.python-version == '3.12'
+        if: always() && matrix.python-version == '3.12'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7
         with:
           name: test-metrics

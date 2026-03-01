@@ -25,12 +25,12 @@ MIN_LOC = 50
 
 
 def _load_gate() -> dict[str, int | float]:
-    with open(GATE_PATH) as f:
+    with open(GATE_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _save_gate(gate: dict[str, int | float]) -> None:
-    with open(GATE_PATH, "w") as f:
+    with open(GATE_PATH, "w", encoding="utf-8") as f:
         json.dump(gate, f, indent=2)
         f.write("\n")
 
@@ -39,14 +39,14 @@ def _load_parity_map() -> dict[str, str]:
     """Load override map: source stem -> test file name (or 'skip')."""
     if not PARITY_MAP_PATH.exists():
         return {}
-    with open(PARITY_MAP_PATH) as f:
+    with open(PARITY_MAP_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def _count_loc(path: Path) -> int:
     """Count non-blank, non-comment lines."""
     count = 0
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             stripped = line.strip()
             if stripped and not stripped.startswith("#"):

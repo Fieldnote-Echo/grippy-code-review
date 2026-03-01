@@ -342,6 +342,7 @@ class TestNodeIdValidation:
             "FILE:abcdef012345",
             "REVIEW:0123456789ab",
             "PATTERN:aabbccddeeff",
+            "FILE_V2:abcdef012345",
         ],
     )
     def test_valid_ids_match(self, node_id: str) -> None:

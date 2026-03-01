@@ -123,8 +123,9 @@ def classify_findings(
 
 # Patterns for dangerous HTML/markdown that could appear in LLM output
 _DANGEROUS_TAGS_RE = re.compile(
-    r"<\s*(?:script|iframe|object|embed|form)\b[^>]*>.*?</\s*(?:script|iframe|object|embed|form)"
-    r"\s*>|<\s*(?:script|iframe|object|embed|form)\b[^>]*/?\s*>",
+    r"<\s*(?:script|iframe|object|embed|form|svg|style)\b[^>]*>"
+    r".*?</\s*(?:script|iframe|object|embed|form|svg|style)\s*>"
+    r"|<\s*(?:script|iframe|object|embed|form|svg|style)\b[^>]*/?\s*>",
     re.IGNORECASE | re.DOTALL,
 )
 _EVENT_HANDLER_RE = re.compile(

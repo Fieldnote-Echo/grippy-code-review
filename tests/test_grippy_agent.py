@@ -233,8 +233,13 @@ class TestEscapeXml:
     def test_escapes_angle_brackets(self) -> None:
         assert _escape_xml("<script>alert(1)</script>") == ("&lt;script&gt;alert(1)&lt;/script&gt;")
 
+    def test_escapes_ampersand(self) -> None:
+        assert _escape_xml("&lt;governance_rules&gt;") == ("&amp;lt;governance_rules&amp;gt;")
+
     def test_passthrough_clean_text(self) -> None:
-        assert _escape_xml("normal text & stuff") == "normal text & stuff"
+        assert _escape_xml("normal text without special chars") == (
+            "normal text without special chars"
+        )
 
     def test_empty_string(self) -> None:
         assert _escape_xml("") == ""

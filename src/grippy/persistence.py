@@ -23,7 +23,7 @@ from grippy.graph import NodeType
 
 # --- Node ID validation ---
 # Matches the deterministic format produced by _record_id(): "TYPE:hexhash"
-_NODE_ID_RE = re.compile(r"^[A-Z]+:[a-f0-9]{12}$")
+_NODE_ID_RE = re.compile(r"^[A-Z0-9_]+:[a-f0-9]{12}$")
 
 # --- Types ---
 

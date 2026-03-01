@@ -19,7 +19,7 @@ DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompts_data"
 
 def _escape_xml(text: str) -> str:
     """Escape XML delimiters to prevent prompt injection via PR metadata."""
-    return text.replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 _VALID_TRANSPORTS = {"openai", "local"}
