@@ -3,6 +3,8 @@
 > Open-source AI code review agent. Your model, your infrastructure, your rules.
 
 [![Tests](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml/badge.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/Fieldnote-Echo/grippy-code-review/main/.github/badges/coverage.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml)
+[![OpenSSF Scorecard](https://raw.githubusercontent.com/Fieldnote-Echo/grippy-code-review/main/.github/badges/scorecard.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/scorecard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 

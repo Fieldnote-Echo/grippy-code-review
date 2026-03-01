@@ -8,6 +8,8 @@ build/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
+test-results.xml
 .dev.vars
 .claude/
 .serena/
