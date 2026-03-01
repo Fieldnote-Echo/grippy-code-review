@@ -2,9 +2,9 @@
 
 > Open-source AI code review agent. Your model, your infrastructure, your rules.
 
-[![Tests](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml/badge.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml)
-[![Coverage](https://raw.githubusercontent.com/Fieldnote-Echo/grippy-code-review/main/.github/badges/coverage.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/tests.yml)
-[![OpenSSF Scorecard](https://raw.githubusercontent.com/Fieldnote-Echo/grippy-code-review/main/.github/badges/scorecard.svg)](https://github.com/Fieldnote-Echo/grippy-code-review/actions/workflows/scorecard.yml)
+[![Tests](https://github.com/Project-Navi/grippy-code-review/actions/workflows/tests.yml/badge.svg)](https://github.com/Project-Navi/grippy-code-review/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/Project-Navi/grippy-code-review/main/.github/badges/coverage.svg)](https://github.com/Project-Navi/grippy-code-review/actions/workflows/tests.yml)
+[![OpenSSF Scorecard](https://raw.githubusercontent.com/Project-Navi/grippy-code-review/main/.github/badges/scorecard.svg)](https://github.com/Project-Navi/grippy-code-review/actions/workflows/scorecard.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
@@ -19,6 +19,8 @@ Grippy reviews pull requests using any OpenAI-compatible model — GPT, Claude, 
 - **Structured output, not just comments.** Every review produces typed findings with severity, confidence, and category. A score out of 100. A verdict (PASS / FAIL / PROVISIONAL). Escalation targets for findings that need human attention.
 
 - **Security-first, not security-added.** Grippy is a security auditor that also reviews code, not the other way around. Dedicated audit modes go deeper than a general-purpose linter.
+
+- **Deterministic rules, not just LLM guesses.** A built-in rule engine runs 6 security rules against every diff before the LLM sees it. Findings are guaranteed — not hallucinated — and the profile gate can fail CI on critical severity hits, independent of model output.
 
 - **It has opinions.** Grippy is a grumpy security auditor persona, not a faceless bot. Good code gets grudging respect. Bad code gets disappointment. The personality keeps reviews readable and honest.
 
@@ -92,7 +94,7 @@ jobs:
 
 ### GitHub Actions (self-hosted LLM)
 
-Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. We recommend **Devstral-Small 24B at Q4 quantization or higher** — tested during development for structured output compliance and review quality. See the [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full setup instructions.
+Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. We recommend **Devstral-Small 24B at Q4 quantization or higher** — tested during development for structured output compliance and review quality. See the [Self-Hosted LLM Guide](https://github.com/Project-Navi/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full setup instructions.
 
 ### Local development
 
@@ -117,30 +119,68 @@ Grippy is configured entirely through environment variables.
 | `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | — |
 | `GRIPPY_DATA_DIR` | Persistence directory | `./grippy-data` |
 | `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `0` |
+| `GRIPPY_PROFILE` | Security profile: `general`, `security`, `strict-security` | `general` |
 | `OPENAI_API_KEY` | OpenAI API key (sets transport to `openai`) | — |
 | `GITHUB_TOKEN` | GitHub API token (set automatically by Actions) | — |
+
+## Security profiles
+
+Grippy's deterministic rule engine is controlled by profiles. Set via `GRIPPY_PROFILE` env var or `--profile` CLI flag (CLI takes priority).
+
+| Profile | Rule engine | Gate threshold | Use case |
+|---|---|---|---|
+| `general` | Off | — | Standard LLM-only review |
+| `security` | On | Fail on ERROR+ | Security-focused CI gate |
+| `strict-security` | On | Fail on WARN+ | High-assurance environments |
+
+When a non-`general` profile is active, Grippy runs 6 deterministic rules before the LLM:
+
+| Rule ID | Detects | Severity |
+|---|---|---|
+| `workflow-permissions-expanded` | write/admin permissions, unpinned actions | ERROR / WARN |
+| `secrets-in-diff` | API keys, private keys, `.env` additions | CRITICAL / WARN |
+| `dangerous-execution-sinks` | unsafe code execution patterns | ERROR |
+| `path-traversal-risk` | tainted path variables, `../` patterns | WARN |
+| `llm-output-unsanitized` | model output piped to sinks without sanitizer | ERROR |
+| `ci-script-execution-risk` | risky CI script patterns, sudo in CI | CRITICAL / WARN |
+
+Rule findings are injected into the LLM context as confirmed facts for explanation.
 
 ## Review modes
 
 | Mode | Trigger | Focus |
 |---|---|---|
 | `pr_review` | Default on PR events | Full code review: correctness, security, style, maintainability |
-| `security_audit` | Manual or scheduled | Deep security analysis: injection, auth, cryptography, data exposure |
+| `security_audit` | Manual, scheduled, or auto when `profile != general` | Deep security analysis: injection, auth, cryptography, data exposure |
 | `governance_check` | Manual or scheduled | Compliance and policy: licensing, access control, audit trails |
 | `surprise_audit` | PR title/body contains "production ready" | Full-scope audit with expanded governance checks |
 | `cli` | Local invocation | Interactive review for local development and testing |
 | `github_app` | GitHub App webhook | Event-driven review via installed GitHub App |
 
+## GitHub Actions outputs
+
+When running as a GitHub Action, Grippy sets these step outputs for downstream workflow logic:
+
+| Output | Type | Description |
+|---|---|---|
+| `score` | int | Review score 0–100 |
+| `verdict` | string | `PASS` / `FAIL` / `PROVISIONAL` |
+| `findings-count` | int | Total LLM finding count |
+| `merge-blocking` | bool | Whether verdict blocks merge |
+| `rule-findings-count` | int | Deterministic rule hit count |
+| `rule-gate-failed` | bool | Whether rule gate caused CI failure |
+| `profile` | string | Active security profile name |
+
 ## Documentation
 
-- [Getting Started](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Getting-Started) — Setup for OpenAI, local LLMs, and development
-- [Configuration](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Configuration) — Environment variables and model options
-- [Architecture](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Architecture) — Module map, prompt system, data flow
-- [Review Modes](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Review-Modes) — The 6 review modes and how they work
-- [Scoring Rubric](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Scoring-Rubric) — How Grippy scores PRs
-- [Security Model](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Security-Model) — Codebase tool protections, hardened CI
-- [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) — Ollama/LM Studio + Cloudflare Tunnel
-- [Contributing](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Contributing) — Dev setup, testing, conventions
+- [Getting Started](https://github.com/Project-Navi/grippy-code-review/wiki/Getting-Started) — Setup for OpenAI, local LLMs, and development
+- [Configuration](https://github.com/Project-Navi/grippy-code-review/wiki/Configuration) — Environment variables and model options
+- [Architecture](https://github.com/Project-Navi/grippy-code-review/wiki/Architecture) — Module map, prompt system, data flow
+- [Review Modes](https://github.com/Project-Navi/grippy-code-review/wiki/Review-Modes) — The 6 review modes and how they work
+- [Scoring Rubric](https://github.com/Project-Navi/grippy-code-review/wiki/Scoring-Rubric) — How Grippy scores PRs
+- [Security Model](https://github.com/Project-Navi/grippy-code-review/wiki/Security-Model) — Codebase tool protections, hardened CI
+- [Self-Hosted LLM Guide](https://github.com/Project-Navi/grippy-code-review/wiki/Self-Hosted-LLM-Guide) — Ollama/LM Studio + Cloudflare Tunnel
+- [Contributing](https://github.com/Project-Navi/grippy-code-review/wiki/Contributing) — Dev setup, testing, conventions
 
 ## License
 
