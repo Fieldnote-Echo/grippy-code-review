@@ -1,0 +1,59 @@
+{
+  "language": "python",
+  "name": "grippy-code-review",
+  "version": "0.2.0",
+  "description": "AI code review agent with personality - built on Agno",
+  "license": "MIT",
+  "python_version": "3.12",
+  "author": {
+    "name": "Nelson Spencer"
+  },
+  "dependencies": {
+    "runtime": [
+      "agno",
+      "pydantic",
+      "PyGithub",
+      "sqlalchemy"
+    ],
+    "dev": [
+      "pytest",
+      "pytest-cov",
+      "ruff",
+      "mypy",
+      "lancedb",
+      "types-requests"
+    ]
+  },
+  "structure": {
+    "src_dir": "src/grippy",
+    "test_dir": "tests"
+  },
+  "features": {
+    "ci": true,
+    "pre_commit": true
+  },
+  "github": {
+    "org": "Fieldnote-Echo",
+    "repo": "grippy-code-review"
+  },
+  "recon": {
+    "existing_tools": {
+      "ruff": true,
+      "mypy": true,
+      "bandit": false,
+      "pre_commit": true,
+      "dependabot": true
+    },
+    "has_pyproject_toml": true,
+    "has_github_dir": true,
+    "existing_ci": [
+      "codeql.yml",
+      "grippy-review.yml",
+      "scorecard.yml",
+      "tests.yml"
+    ],
+    "test_framework": "pytest",
+    "test_count": 288,
+    "updated_at": "2026-02-28T22:55:52.108973+00:00"
+  }
+}

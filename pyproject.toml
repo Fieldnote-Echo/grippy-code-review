@@ -25,6 +25,7 @@ dependencies = [
     "PyGithub>=2.1.0",
     "sqlalchemy>=2.0.0",
     "defusedxml>=0.7.0",
+    "nh3>=0.2.0",
 ]
 
 [project.optional-dependencies]

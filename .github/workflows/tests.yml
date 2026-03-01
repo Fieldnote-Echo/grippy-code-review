@@ -162,7 +162,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download test metrics
-        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v4
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8
         with:
           name: test-metrics
 
@@ -203,7 +203,7 @@ jobs:
           git add .github/quality-gate.json .github/badges/coverage.svg
           git diff --cached --quiet && exit 0
           git commit -m "chore: update quality gate and coverage badge [skip ci]"
-          git push
+          git push || echo "::warning::Push blocked by branch protection — badge update skipped"
 
   test-file-parity:
     name: Test file parity

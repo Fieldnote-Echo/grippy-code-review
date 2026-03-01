@@ -52,15 +52,28 @@ def load_identity(prompts_dir: Path) -> str:
     return "\n\n".join(parts)
 
 
-def load_instructions(prompts_dir: Path, mode: str = "pr_review") -> list[str]:
+def load_instructions(
+    prompts_dir: Path,
+    mode: str = "pr_review",
+    *,
+    include_rule_findings: bool = False,
+) -> list[str]:
     """Load the composed instruction chain for a review mode.
 
-    Composes: MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX.
+    Composes: MODE_CHAINS[mode] + SHARED_PROMPTS + [rule-findings-context.md] + CHAIN_SUFFIX.
+
+    Args:
+        prompts_dir: Directory containing prompt markdown files.
+        mode: Review mode key.
+        include_rule_findings: When True, inserts rule-findings-context.md before the suffix.
 
     Returns a list of strings (one per prompt file) for Agno's instructions parameter.
     """
     if mode not in MODE_CHAINS:
         msg = f"Unknown review mode: {mode}. Available: {list(MODE_CHAINS.keys())}"
         raise ValueError(msg)
-    chain = MODE_CHAINS[mode] + SHARED_PROMPTS + CHAIN_SUFFIX
+    chain = MODE_CHAINS[mode] + SHARED_PROMPTS
+    if include_rule_findings:
+        chain = [*chain, "rule-findings-context.md"]
+    chain = [*chain, *CHAIN_SUFFIX]
     return [load_prompt_file(prompts_dir, f) for f in chain]

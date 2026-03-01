@@ -11,6 +11,7 @@ import re
 import subprocess
 from typing import Any
 
+import nh3
 from github import Github, GithubException
 
 from grippy.schema import Finding
@@ -121,17 +122,8 @@ def classify_findings(
 
 # --- Output sanitization ---
 
-# Patterns for dangerous HTML/markdown that could appear in LLM output
-_DANGEROUS_TAGS_RE = re.compile(
-    r"<\s*(?:script|iframe|object|embed|form|svg|style)\b[^>]*>"
-    r".*?</\s*(?:script|iframe|object|embed|form|svg|style)\s*>"
-    r"|<\s*(?:script|iframe|object|embed|form|svg|style)\b[^>]*/?\s*>",
-    re.IGNORECASE | re.DOTALL,
-)
-_EVENT_HANDLER_RE = re.compile(
-    r"\bon\w+\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s>]+)",
-    re.IGNORECASE,
-)
+# Dangerous URL schemes in markdown link syntax — not covered by nh3
+# since [text](javascript:...) is markdown, not HTML.
 _DANGEROUS_SCHEME_RE = re.compile(
     r"(?:javascript|data|vbscript)\s*:",
     re.IGNORECASE,
@@ -139,20 +131,23 @@ _DANGEROUS_SCHEME_RE = re.compile(
 
 
 def _sanitize_comment_text(text: str) -> str:
-    """Strip dangerous HTML tags, event handlers, and URL schemes from text.
+    """Sanitize LLM-generated text using allowlist-based HTML cleaning.
 
-    LLM-generated free-text fields are posted to GitHub PR comments. A prompt
-    injection could cause the model to emit malicious markdown/HTML. This
-    function neutralizes known dangerous patterns before posting.
+    Uses nh3 (Rust-based HTML sanitizer) instead of a regex blocklist.
+    Strips all HTML tags from free-text fields — only standard markdown
+    syntax (bold, italic, code spans, etc.) is preserved. A second pass
+    neutralizes dangerous URL schemes in markdown link syntax.
+
+    This is defense-in-depth: GitHub's own renderer also sanitizes, but
+    we neutralize injection attempts before they ever reach the API.
 
     Args:
         text: Raw text from an LLM-generated field.
 
     Returns:
-        Cleaned text with dangerous content stripped.
+        Cleaned text with HTML tags removed and dangerous schemes stripped.
     """
-    text = _DANGEROUS_TAGS_RE.sub("", text)
-    text = _EVENT_HANDLER_RE.sub("", text)
+    text = nh3.clean(text, tags=set())
     text = _DANGEROUS_SCHEME_RE.sub("", text)
     return text
 

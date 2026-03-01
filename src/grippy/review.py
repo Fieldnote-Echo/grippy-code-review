@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
 from grippy.retry import ReviewParseError, run_review
+from grippy.rules import RuleResult, RuleSeverity, check_gate, load_profile, run_rules
 
 # Max diff size sent to the LLM — ~500K chars ≈ 125K tokens
 MAX_DIFF_CHARS = 500_000
@@ -161,7 +163,41 @@ def _with_timeout(fn: Callable[[], Any], *, timeout_seconds: int) -> Any:
         signal.signal(signal.SIGALRM, old_handler)
 
 
-def main() -> None:
+_SEVERITY_MAP: dict[RuleSeverity, str] = {
+    RuleSeverity.CRITICAL: "CRITICAL",
+    RuleSeverity.ERROR: "ERROR",
+    RuleSeverity.WARN: "WARN",
+    RuleSeverity.INFO: "INFO",
+}
+
+
+def _escape_rule_field(text: str) -> str:
+    """Escape XML delimiters in rule finding fields to prevent prompt injection.
+
+    Crafted filenames or evidence strings could contain XML/prompt-injection
+    payloads (e.g. ``</rule_findings><system>``). Escaping neutralizes them.
+    """
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _format_rule_findings(results: list[RuleResult]) -> str:
+    """Format rule findings as text for the LLM context."""
+    lines: list[str] = []
+    for r in results:
+        sev = _SEVERITY_MAP.get(r.severity, "INFO")
+        file_safe = _escape_rule_field(r.file)
+        msg_safe = _escape_rule_field(r.message)
+        parts = [f"[{sev}] {r.rule_id} @ {file_safe}"]
+        if r.line is not None:
+            parts[0] += f":{r.line}"
+        parts[0] += f": {msg_safe}"
+        if r.evidence:
+            parts.append(f"  evidence: {_escape_rule_field(r.evidence)}")
+        lines.append(" | ".join(parts) if r.evidence else parts[0])
+    return "\n".join(lines)
+
+
+def main(*, profile: str | None = None) -> None:
     """CI entry point — reads env, runs review, posts comment."""
     # Load .dev.vars if present (local dev)
     dev_vars_path = Path(__file__).resolve().parent.parent.parent / ".dev.vars"
@@ -202,7 +238,21 @@ def main() -> None:
         f"({pr_event['head_ref']} → {pr_event['base_ref']})"
     )
 
-    # 2. Validate transport + create agent early (before expensive diff fetch)
+    # 2. Validate transport early (before expensive diff fetch)
+    from grippy.agent import _resolve_transport
+
+    try:
+        _resolve_transport(transport, model_id)
+    except ValueError as exc:
+        print(f"::error::Invalid configuration: {exc}")
+        post_comment(
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
+        )
+        sys.exit(1)
+
     data_dir_str = os.environ.get("GRIPPY_DATA_DIR", "./grippy-data")
     embedding_model = os.environ.get("GRIPPY_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b")
     data_dir = Path(data_dir_str)
@@ -241,28 +291,6 @@ def main() -> None:
         except Exception as exc:
             print(f"::warning::Codebase indexing failed (non-fatal): {exc}")
 
-    try:
-        agent = create_reviewer(
-            model_id=model_id,
-            base_url=base_url,
-            api_key=api_key,
-            transport=transport,
-            mode=mode,
-            db_path=data_dir / "grippy-session.db",
-            session_id=f"pr-{pr_event['pr_number']}",
-            tools=codebase_tools or None,
-            tool_call_limit=10 if codebase_tools else None,
-        )
-    except ValueError as exc:
-        print(f"::error::Invalid configuration: {exc}")
-        post_comment(
-            token,
-            pr_event["repo"],
-            pr_event["pr_number"],
-            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
-        )
-        sys.exit(1)
-
     # 3. Fetch diff (M2: graceful 403 handling for fork PRs)
     print("Fetching PR diff...")
     try:
@@ -288,12 +316,64 @@ def main() -> None:
     file_count = diff.count("diff --git")
     print(f"  {file_count} files, {len(diff)} chars")
 
-    # H2: cap diff size to avoid overflowing LLM context
+    # 3b. Run security rule engine on FULL diff (before truncation)
+    try:
+        profile_config = load_profile(cli_profile=profile)
+    except ValueError as exc:
+        print(f"::error::Invalid profile: {exc}")
+        post_comment(
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
+        )
+        sys.exit(1)
+
+    rule_findings: list[RuleResult] = []
+    rule_gate_failed = False
+    expected_rule_counts: dict[str, int] | None = None
+    rule_findings_text = ""
+
+    if profile_config.name != "general":
+        print(f"Running rule engine (profile={profile_config.name})...")
+        rule_findings = run_rules(diff, profile_config)
+        rule_gate_failed = check_gate(rule_findings, profile_config)
+        print(f"  {len(rule_findings)} findings, gate={'FAILED' if rule_gate_failed else 'passed'}")
+        if rule_findings:
+            rule_findings_text = _format_rule_findings(rule_findings)
+            expected_rule_counts = dict(Counter(r.rule_id for r in rule_findings))
+        mode = "security_audit"
+
+    # H2: cap diff size to avoid overflowing LLM context (after rule engine)
     original_len = len(diff)
     diff = truncate_diff(diff)
     diff_truncated = len(diff) < original_len
     if diff_truncated:
         print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
+
+    # 3c. Create agent (after rule engine, so mode/rule_findings are resolved)
+    try:
+        agent = create_reviewer(
+            model_id=model_id,
+            base_url=base_url,
+            api_key=api_key,
+            transport=transport,
+            mode=mode,
+            db_path=data_dir / "grippy-session.db",
+            session_id=f"pr-{pr_event['pr_number']}",
+            tools=codebase_tools or None,
+            tool_call_limit=10 if codebase_tools else None,
+            include_rule_findings=bool(rule_findings),
+        )
+    except ValueError as exc:
+        print(f"::error::Invalid configuration: {exc}")
+        post_comment(
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
+        )
+        sys.exit(1)
 
     # 4. Format context
     user_message = format_pr_context(
@@ -302,13 +382,14 @@ def main() -> None:
         branch=f"{pr_event['head_ref']} → {pr_event['base_ref']}",
         description=pr_event["description"],
         diff=diff,
+        rule_findings=rule_findings_text,
     )
 
     # 5. Run review with retry + validation (replaces agent.run + parse_review_response)
     print(f"Running review (model={model_id}, endpoint={base_url})...")
     try:
         review = _with_timeout(
-            lambda: run_review(agent, user_message),
+            lambda: run_review(agent, user_message, expected_rule_counts=expected_rule_counts),
             timeout_seconds=timeout_seconds,
         )
     except ReviewParseError as exc:
@@ -390,8 +471,14 @@ def main() -> None:
             f.write(f"verdict={review.verdict.status.value}\n")
             f.write(f"findings-count={len(review.findings)}\n")
             f.write(f"merge-blocking={str(review.verdict.merge_blocking).lower()}\n")
+            f.write(f"rule-findings-count={len(rule_findings)}\n")
+            f.write(f"rule-gate-failed={str(rule_gate_failed).lower()}\n")
+            f.write(f"profile={profile_config.name}\n")
 
-    # Exit non-zero if merge-blocking
+    # Exit non-zero if merge-blocking or rule gate failed
+    if rule_gate_failed:
+        print(f"::warning::Rule gate FAILED (profile={profile_config.name})")
+        sys.exit(1)
     if review.verdict.merge_blocking:
         print(f"::warning::Review verdict: {review.verdict.status.value} (merge-blocking)")
         sys.exit(1)

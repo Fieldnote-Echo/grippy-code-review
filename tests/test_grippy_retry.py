@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from grippy.retry import ReviewParseError, _safe_error_summary, run_review
+from grippy.retry import ReviewParseError, _safe_error_summary, _validate_rule_coverage, run_review
 from grippy.schema import GrippyReview
 
 # --- Fixtures ---
@@ -307,3 +307,62 @@ class TestRetrySanitization:
         # Should use generic summary, not raw error string
         assert "JSON decode error" in retry_message
         assert "not valid json" not in retry_message
+
+
+# --- Rule coverage count validation ---
+
+
+class TestRuleCoverageCounts:
+    """Verify _validate_rule_coverage checks per-rule finding counts."""
+
+    def _review_with_findings(self, rule_ids: list[str | None]) -> GrippyReview:
+        """Create a review with findings having specified rule_ids."""
+        import copy
+
+        data = copy.deepcopy(VALID_REVIEW_DICT)
+        data["findings"] = [
+            {
+                "id": f"F-{i:03d}",
+                "severity": "HIGH",
+                "confidence": 90,
+                "category": "security",
+                "file": "src/app.py",
+                "line_start": 10 + i,
+                "line_end": 15 + i,
+                "title": f"Finding {i}",
+                "description": f"Description {i}",
+                "suggestion": f"Fix {i}",
+                "evidence": "...",
+                "grippy_note": "Grippy says.",
+                "rule_id": rid,
+            }
+            for i, rid in enumerate(rule_ids)
+        ]
+        return GrippyReview.model_validate(data)
+
+    def test_all_counts_met(self) -> None:
+        """No missing rules when all counts are satisfied."""
+        review = self._review_with_findings(["secrets-in-diff", "secrets-in-diff", "eval-exec"])
+        missing = _validate_rule_coverage(review, {"secrets-in-diff": 2, "eval-exec": 1})
+        assert missing == []
+
+    def test_missing_count(self) -> None:
+        """Reports rule with insufficient finding count."""
+        review = self._review_with_findings(["secrets-in-diff"])
+        missing = _validate_rule_coverage(review, {"secrets-in-diff": 3})
+        assert len(missing) == 1
+        assert "secrets-in-diff" in missing[0]
+        assert "expected 3" in missing[0]
+
+    def test_completely_missing_rule(self) -> None:
+        """Reports rule with zero findings."""
+        review = self._review_with_findings([])
+        missing = _validate_rule_coverage(review, {"eval-exec": 1})
+        assert len(missing) == 1
+        assert "expected 1, got 0" in missing[0]
+
+    def test_extra_findings_ok(self) -> None:
+        """More findings than expected is fine."""
+        review = self._review_with_findings(["secrets-in-diff"] * 5)
+        missing = _validate_rule_coverage(review, {"secrets-in-diff": 2})
+        assert missing == []
