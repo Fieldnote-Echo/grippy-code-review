@@ -116,10 +116,11 @@ Grippy is configured entirely through environment variables.
 | `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
 | `GRIPPY_BASE_URL` | API endpoint for local transport | `http://localhost:1234/v1` |
 | `GRIPPY_EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
-| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | — |
+| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | `lm-studio` |
 | `GRIPPY_DATA_DIR` | Persistence directory | `./grippy-data` |
-| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `0` |
+| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `300` |
 | `GRIPPY_PROFILE` | Security profile: `general`, `security`, `strict-security` | `general` |
+| `GRIPPY_MODE` | Review mode override | `pr_review` |
 | `OPENAI_API_KEY` | OpenAI API key (sets transport to `openai`) | — |
 | `GITHUB_TOKEN` | GitHub API token (set automatically by Actions) | — |
 

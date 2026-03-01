@@ -165,9 +165,15 @@ _SEVERITY_EMOJI = {
 _GRIPPY_MARKER_RE = re.compile(r"<!-- grippy:(?P<file>[^:]+):(?P<category>[^:]+):(?P<line>\d+) -->")
 
 
+def _sanitize_path(path: str) -> str:
+    """Strip characters that could break HTML comment markers or inject content."""
+    return re.sub(r"[^a-zA-Z0-9_./ -]", "", path)
+
+
 def _finding_marker(finding: Finding) -> str:
     """Build an HTML comment marker for dedup — keyed on file, category, line."""
-    return f"<!-- grippy:{finding.file}:{finding.category.value}:{finding.line_start} -->"
+    safe_file = _sanitize_path(finding.file)
+    return f"<!-- grippy:{safe_file}:{finding.category.value}:{finding.line_start} -->"
 
 
 def build_review_comment(finding: Finding) -> dict[str, str | int]:
@@ -197,7 +203,7 @@ def build_review_comment(finding: Finding) -> dict[str, str | int]:
         _finding_marker(finding),
     ]
     return {
-        "path": finding.file,
+        "path": _sanitize_path(finding.file),
         "body": "\n".join(body_lines),
         "line": finding.line_start,
         "side": "RIGHT",

@@ -88,12 +88,10 @@ def create_reviewer(
     transport: str | None = None,
     prompts_dir: Path | str = DEFAULT_PROMPTS_DIR,
     mode: str = "pr_review",
-    # Phase 1 additions
     db_path: Path | str | None = None,
     session_id: str | None = None,
     num_history_runs: int = 3,
     additional_context: str | None = None,
-    # Phase 3: codebase search
     tools: list[Any] | None = None,
     tool_call_limit: int | None = None,
     # Security rule engine
@@ -196,22 +194,22 @@ def format_pr_context(
         f"Author: {_escape_xml(author)}\n"
         f"Branch: {_escape_xml(branch)}\n"
         f"Description: {_escape_xml(description)}\n"
-        f"Labels: {labels}\n"
+        f"Labels: {_escape_xml(labels)}\n"
         f"Changed Files: {changed_files}\n"
         f"Additions: {additions}\n"
         f"Deletions: {deletions}\n"
         f"</pr_metadata>"
     )
 
-    sections.append(f"<diff>\n{diff}\n</diff>")
+    sections.append(f"<diff>\n{_escape_xml(diff)}\n</diff>")
 
     if file_context:
-        sections.append(f"<file_context>\n{file_context}\n</file_context>")
+        sections.append(f"<file_context>\n{_escape_xml(file_context)}\n</file_context>")
 
     if learnings:
-        sections.append(f"<learnings>\n{learnings}\n</learnings>")
+        sections.append(f"<learnings>\n{_escape_xml(learnings)}\n</learnings>")
 
     if rule_findings:
-        sections.append(f"<rule_findings>\n{rule_findings}\n</rule_findings>")
+        sections.append(f"<rule_findings>\n{_escape_xml(rule_findings)}\n</rule_findings>")
 
     return "\n\n".join(sections)

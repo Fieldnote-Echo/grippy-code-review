@@ -536,10 +536,10 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "agno", extra = ["openai"] },
-    { name = "defusedxml" },
     { name = "nh3" },
     { name = "pydantic" },
     { name = "pygithub" },
+    { name = "requests" },
     { name = "sqlalchemy" },
 ]
 
@@ -551,6 +551,7 @@ persistence = [
 [package.dev-dependencies]
 dev = [
     { name = "bandit" },
+    { name = "defusedxml" },
     { name = "hypothesis" },
     { name = "lancedb" },
     { name = "mypy" },
@@ -565,11 +566,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "agno", extras = ["openai"], specifier = ">=1.1.0" },
-    { name = "defusedxml", specifier = ">=0.7.0" },
     { name = "lancedb", marker = "extra == 'persistence'", specifier = ">=0.20.0" },
     { name = "nh3", specifier = ">=0.2.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pygithub", specifier = ">=2.1.0" },
+    { name = "requests", specifier = ">=2.28.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
 ]
 provides-extras = ["persistence"]
@@ -577,6 +578,7 @@ provides-extras = ["persistence"]
 [package.metadata.requires-dev]
 dev = [
     { name = "bandit", specifier = ">=1.9.0" },
+    { name = "defusedxml", specifier = ">=0.7.0" },
     { name = "hypothesis", specifier = ">=6.0.0" },
     { name = "lancedb", specifier = ">=0.20.0" },
     { name = "mypy", specifier = ">=1.8.0" },

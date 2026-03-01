@@ -59,8 +59,7 @@ PR event (GITHUB_EVENT_PATH) → load PR metadata
   → create_reviewer() (agent.py) — Agno agent with prompt chain + tools
   → format_pr_context() (agent.py) — build LLM user message with rule findings
   → run_review() (retry.py) — run agent with structured output validation + retry
-  → post_review() (github_review.py) — inline comments + summary
-  → resolve_threads() — mark prior findings as resolved
+  → post_review() (github_review.py) — inline comments + summary + resolve stale threads
   → set GitHub Actions outputs (score, verdict, rule-gate-failed, profile, …)
 ```
 
@@ -110,10 +109,11 @@ Review modes: `pr_review`, `security_audit`, `governance_check`, `surprise_audit
 | `GRIPPY_MODEL_ID` | Model identifier | `devstral-small-2-24b-instruct-2512` |
 | `GRIPPY_BASE_URL` | API endpoint for local transport | `http://localhost:1234/v1` |
 | `GRIPPY_EMBEDDING_MODEL` | Embedding model name | `text-embedding-qwen3-embedding-4b` |
-| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | — |
+| `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | `lm-studio` |
 | `GRIPPY_DATA_DIR` | Persistence directory | `./grippy-data` |
-| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `0` |
+| `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `300` |
 | `GRIPPY_PROFILE` | Security profile: `general`, `security`, `strict-security` | `general` |
+| `GRIPPY_MODE` | Review mode override | `pr_review` |
 | `OPENAI_API_KEY` | OpenAI API key (when transport=openai) | — |
 | `GITHUB_TOKEN` | GitHub API access for PR operations | — |
 | `GITHUB_EVENT_PATH` | Path to PR event JSON (set by Actions) | — |

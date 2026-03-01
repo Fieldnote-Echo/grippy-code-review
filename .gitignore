@@ -15,4 +15,6 @@ test-results.xml
 .serena/
 grippy-data/
 docs/internal/
+docs/plans/
+nboot-spec.json
 .hypothesis/

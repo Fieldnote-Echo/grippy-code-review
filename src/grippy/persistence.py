@@ -17,8 +17,6 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-import lancedb  # type: ignore[import-untyped]
-
 from grippy.graph import NodeType
 
 # --- Node ID validation ---
@@ -132,10 +130,12 @@ class GrippyStore:
         self._conn.row_factory = sqlite3.Row
         self._init_sqlite()
 
-        # Init LanceDB
+        # Init LanceDB (lazy import — lancedb is an optional dependency)
+        import lancedb  # type: ignore[import-untyped]
+
         self._lance_dir.mkdir(parents=True, exist_ok=True)
         self._lance_db = lancedb.connect(str(self._lance_dir))
-        self._nodes_table: lancedb.table.Table | None = None
+        self._nodes_table: Any = None
 
     def _init_sqlite(self) -> None:
         cur = self._conn.cursor()
@@ -184,7 +184,7 @@ class GrippyStore:
             cur.execute("ALTER TABLE nodes ADD COLUMN updated_at TEXT")
             cur.execute("UPDATE nodes SET updated_at = created_at WHERE updated_at IS NULL")
 
-    def _ensure_nodes_table(self) -> lancedb.table.Table | None:
+    def _ensure_nodes_table(self) -> Any:
         """Open existing nodes table if present."""
         if self._nodes_table is not None:
             return self._nodes_table
