@@ -130,6 +130,42 @@ class TestWorkflowPermissions:
         results = rule.run(_ctx(diff))
         assert not any("Unpinned" in r.message for r in results)
 
+    def test_scalar_permissions_write_all(self) -> None:
+        """Scalar 'permissions: write-all' on same line is detected."""
+        diff = (
+            "diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml\n"
+            "--- a/.github/workflows/deploy.yml\n"
+            "+++ b/.github/workflows/deploy.yml\n"
+            "@@ -1,3 +1,4 @@\n"
+            " name: deploy\n"
+            "+permissions: write-all\n"
+            " on:\n"
+            "   push:\n"
+        )
+        rule = WorkflowPermissionsRule()
+        results = rule.run(_ctx(diff))
+        assert any(
+            r.severity == RuleSeverity.ERROR and "write" in r.message.lower() for r in results
+        )
+
+    def test_scalar_permissions_read_not_flagged(self) -> None:
+        """Scalar 'permissions: read-all' is not flagged."""
+        diff = (
+            "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n"
+            "--- a/.github/workflows/ci.yml\n"
+            "+++ b/.github/workflows/ci.yml\n"
+            "@@ -1,3 +1,4 @@\n"
+            " name: ci\n"
+            "+permissions: read-all\n"
+            " on:\n"
+            "   push:\n"
+        )
+        rule = WorkflowPermissionsRule()
+        results = rule.run(_ctx(diff))
+        assert not any(
+            "write" in r.message.lower() or "admin" in r.message.lower() for r in results
+        )
+
     def test_non_workflow_file_ignored(self) -> None:
         diff = (
             "diff --git a/config.yml b/config.yml\n"

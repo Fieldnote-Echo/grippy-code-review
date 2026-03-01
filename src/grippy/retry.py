@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -84,11 +85,21 @@ def _parse_response(content: Any) -> GrippyReview:
 
 def _validate_rule_coverage(
     review: GrippyReview,
-    expected_rule_ids: set[str],
+    expected_rule_counts: dict[str, int],
 ) -> list[str]:
-    """Return rule_ids missing from findings. Checks Finding.rule_id field."""
-    found_ids = {f.rule_id for f in review.findings if f.rule_id}
-    return sorted(expected_rule_ids - found_ids)
+    """Return rule_ids with insufficient findings.
+
+    Validates that the LLM produced at least as many findings per rule_id
+    as the deterministic engine detected. Prevents silent dropping of
+    multiple findings from the same rule (e.g. several leaked secrets).
+    """
+    found_counts = Counter(f.rule_id for f in review.findings if f.rule_id)
+    missing: list[str] = []
+    for rule_id, expected in sorted(expected_rule_counts.items()):
+        found = found_counts.get(rule_id, 0)
+        if found < expected:
+            missing.append(f"{rule_id} (expected {expected}, got {found})")
+    return missing
 
 
 def run_review(
@@ -97,7 +108,7 @@ def run_review(
     *,
     max_retries: int = 3,
     on_validation_error: Callable[[int, Exception], None] | None = None,
-    expected_rule_ids: set[str] | None = None,
+    expected_rule_counts: dict[str, int] | None = None,
 ) -> GrippyReview:
     """Run a review with structured output validation and retry.
 
@@ -125,8 +136,8 @@ def run_review(
         try:
             review = _parse_response(content)
             # Post-parse rule coverage validation
-            if expected_rule_ids:
-                missing = _validate_rule_coverage(review, expected_rule_ids)
+            if expected_rule_counts:
+                missing = _validate_rule_coverage(review, expected_rule_counts)
                 if missing:
                     error_str = f"Missing rule findings: {', '.join(missing)}"
                     errors.append(f"Attempt {attempt}: {error_str}")

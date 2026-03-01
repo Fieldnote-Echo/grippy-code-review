@@ -66,6 +66,20 @@ class WorkflowPermissionsRule:
             # Check permissions: blocks
             perm_match = _PERMISSIONS_RE.match(content)
             if perm_match:
+                # Check scalar permissions on same line (e.g. "permissions: write-all")
+                remainder = content[perm_match.end() :]
+                if _WRITE_ADMIN_RE.search(remainder) and _is_near_added(lines, i):
+                    results.append(
+                        RuleResult(
+                            rule_id=self.id,
+                            severity=RuleSeverity.ERROR,
+                            message="Workflow permissions expanded to write/admin",
+                            file=f.path,
+                            line=dl.new_lineno or dl.old_lineno,
+                            evidence=content.strip(),
+                        )
+                    )
+                # Also check block-style indented children
                 results.extend(self._check_permissions_block(f, lines, i))
 
             # Check pull_request_target

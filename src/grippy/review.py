@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -316,10 +317,21 @@ def main(*, profile: str | None = None) -> None:
     print(f"  {file_count} files, {len(diff)} chars")
 
     # 3b. Run security rule engine on FULL diff (before truncation)
-    profile_config = load_profile(cli_profile=profile)
+    try:
+        profile_config = load_profile(cli_profile=profile)
+    except ValueError as exc:
+        print(f"::error::Invalid profile: {exc}")
+        post_comment(
+            token,
+            pr_event["repo"],
+            pr_event["pr_number"],
+            _failure_comment(pr_event["repo"], "CONFIG ERROR"),
+        )
+        sys.exit(1)
+
     rule_findings: list[RuleResult] = []
     rule_gate_failed = False
-    expected_rule_ids: set[str] | None = None
+    expected_rule_counts: dict[str, int] | None = None
     rule_findings_text = ""
 
     if profile_config.name != "general":
@@ -329,7 +341,7 @@ def main(*, profile: str | None = None) -> None:
         print(f"  {len(rule_findings)} findings, gate={'FAILED' if rule_gate_failed else 'passed'}")
         if rule_findings:
             rule_findings_text = _format_rule_findings(rule_findings)
-            expected_rule_ids = {r.rule_id for r in rule_findings}
+            expected_rule_counts = dict(Counter(r.rule_id for r in rule_findings))
         mode = "security_audit"
 
     # H2: cap diff size to avoid overflowing LLM context (after rule engine)
@@ -377,7 +389,7 @@ def main(*, profile: str | None = None) -> None:
     print(f"Running review (model={model_id}, endpoint={base_url})...")
     try:
         review = _with_timeout(
-            lambda: run_review(agent, user_message, expected_rule_ids=expected_rule_ids),
+            lambda: run_review(agent, user_message, expected_rule_counts=expected_rule_counts),
             timeout_seconds=timeout_seconds,
         )
     except ReviewParseError as exc:
