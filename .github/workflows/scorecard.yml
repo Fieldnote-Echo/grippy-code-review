@@ -45,3 +45,32 @@ jobs:
         uses: github/codeql-action/upload-sarif@89a39a4e59826350b863aa6b6252a07ad50cf83e  # v4.32.4
         with:
           sarif_file: results.sarif
+
+      - name: Run Scorecard (JSON for badge)
+        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a  # v2.4.3
+        with:
+          repo_token: ${{ secrets.SCORECARD_TOKEN || secrets.GITHUB_TOKEN }}
+          results_file: results.json
+          results_format: json
+          publish_results: false
+
+      - name: Generate scorecard badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          SCORE=$(python3 -c "import json; print(json.load(open('results.json'))['score'])")
+          if python3 -c "exit(0 if float('$SCORE') >= 7.0 else 1)"; then COLOR="brightgreen";
+          elif python3 -c "exit(0 if float('$SCORE') >= 5.0 else 1)"; then COLOR="green";
+          elif python3 -c "exit(0 if float('$SCORE') >= 3.0 else 1)"; then COLOR="yellowgreen";
+          else COLOR="red"; fi
+          mkdir -p .github/badges
+          curl -s "https://img.shields.io/badge/openssf_scorecard-${SCORE}-${COLOR}" > .github/badges/scorecard.svg
+
+      - name: Commit scorecard badge
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/scorecard.svg
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: update scorecard badge [skip ci]"
+          git push

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from grippy.graph import NodeType
-from grippy.persistence import GrippyStore, _record_id
+from grippy.persistence import _NODE_ID_RE, GrippyStore, _record_id
 
 EMBED_DIM = 8
 
@@ -328,3 +328,57 @@ class TestVectorSearch:
         """get_all_nodes on empty store returns empty list."""
         nodes = store.get_all_nodes()
         assert nodes == []
+
+
+# --- Node ID validation ---
+
+
+class TestNodeIdValidation:
+    """Validate _NODE_ID_RE and the guard in _upsert_vectors."""
+
+    @pytest.mark.parametrize(
+        "node_id",
+        [
+            "FILE:abcdef012345",
+            "REVIEW:0123456789ab",
+            "PATTERN:aabbccddeeff",
+            "FILE_V2:abcdef012345",
+        ],
+    )
+    def test_valid_ids_match(self, node_id: str) -> None:
+        """Well-formed node IDs pass the regex."""
+        assert _NODE_ID_RE.match(node_id)
+
+    @pytest.mark.parametrize(
+        "node_id",
+        [
+            "FILE:abc' OR 1=1 --",
+            "'; DROP TABLE nodes; --",
+            "FILE:abc",
+            "file:abcdef012345",
+            "FILE:ABCDEF012345",
+            "",
+        ],
+    )
+    def test_invalid_ids_rejected(self, node_id: str) -> None:
+        """Malformed node IDs do NOT pass the regex."""
+        assert not _NODE_ID_RE.match(node_id)
+
+    def test_upsert_vectors_rejects_malformed_stale_id(self, store: GrippyStore) -> None:
+        """_upsert_vectors raises ValueError when a stale node_id fails validation.
+
+        Scenario: a poisoned node_id is already in LanceDB (first insert bypasses
+        the delete path). On the second call with changed text, the id becomes
+        stale and must pass validation before reaching table.delete().
+        """
+        poisoned_id = "FILE:abc' OR 1=1 --"
+        fake_vec = [0.0] * EMBED_DIM
+
+        # First call — creates the LanceDB table (no delete path triggered)
+        nodes_v1 = [{"id": poisoned_id, "type": "FILE", "label": "old.py", "data": "{}"}]
+        store._upsert_vectors(nodes_v1, [fake_vec])
+
+        # Second call — same id, different label → triggers stale-id delete path
+        nodes_v2 = [{"id": poisoned_id, "type": "FILE", "label": "new.py", "data": "{}"}]
+        with pytest.raises(ValueError, match="Invalid node_id"):
+            store._upsert_vectors(nodes_v2, [fake_vec])

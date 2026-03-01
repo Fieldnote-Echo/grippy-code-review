@@ -177,6 +177,7 @@ def main() -> None:
     event_path_str = os.environ.get("GITHUB_EVENT_PATH", "")
     base_url = os.environ.get("GRIPPY_BASE_URL", "http://localhost:1234/v1")
     model_id = os.environ.get("GRIPPY_MODEL_ID", "devstral-small-2-24b-instruct-2512")
+    api_key = os.environ.get("GRIPPY_API_KEY", "lm-studio")
     transport = os.environ.get("GRIPPY_TRANSPORT") or None
     mode = os.environ.get("GRIPPY_MODE", "pr_review")
     timeout_seconds = int(os.environ.get("GRIPPY_TIMEOUT", "300"))
@@ -218,6 +219,7 @@ def main() -> None:
                 transport=transport or "local",
                 model=embedding_model,
                 base_url=base_url,
+                api_key=api_key,
             )
             lance_dir = data_dir / "lance"
             lance_dir.mkdir(parents=True, exist_ok=True)
@@ -243,6 +245,7 @@ def main() -> None:
         agent = create_reviewer(
             model_id=model_id,
             base_url=base_url,
+            api_key=api_key,
             transport=transport,
             mode=mode,
             db_path=data_dir / "grippy-session.db",

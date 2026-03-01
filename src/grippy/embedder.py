@@ -10,6 +10,7 @@ def create_embedder(
     transport: str,
     model: str,
     base_url: str,
+    api_key: str = "lm-studio",
 ) -> OpenAIEmbedder:
     """Create an Agno embedder based on the resolved transport.
 
@@ -17,6 +18,7 @@ def create_embedder(
         transport: "openai" or "local".
         model: Embedding model ID (e.g. "text-embedding-3-large").
         base_url: API base URL (used only for local transport).
+        api_key: API key for non-OpenAI endpoints (default: "lm-studio").
 
     Returns:
         Configured OpenAIEmbedder instance.
@@ -24,6 +26,6 @@ def create_embedder(
     if transport == "openai":
         return OpenAIEmbedder(id=model)
     if transport == "local":
-        return OpenAIEmbedder(id=model, base_url=base_url, api_key="lm-studio")
+        return OpenAIEmbedder(id=model, base_url=base_url, api_key=api_key)
     msg = f"Unknown transport: {transport!r}. Expected 'openai' or 'local'."
     raise ValueError(msg)

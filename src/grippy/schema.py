@@ -101,11 +101,11 @@ class Finding(BaseModel):
     file: str
     line_start: int
     line_end: int
-    title: str
-    description: str
-    suggestion: str
+    title: str = Field(max_length=280)
+    description: str = Field(max_length=2000)
+    suggestion: str = Field(max_length=1000)
     governance_rule_id: str | None = None
-    evidence: str
+    evidence: str = Field(max_length=1000)
     grippy_note: str = Field(max_length=280)
 
 

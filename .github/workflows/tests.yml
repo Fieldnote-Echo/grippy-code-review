@@ -44,7 +44,28 @@ jobs:
         run: uv sync
 
       - name: Run tests
-        run: uv run pytest tests/ -v --cov=src/grippy --cov-report=term-missing --cov-fail-under=80
+        env:
+          EXTRA_ARGS: ${{ matrix.python-version == '3.12' && '--cov-report=xml --junitxml=test-results.xml' || '' }}
+        run: |
+          uv run pytest tests/ -v \
+            --cov=src/grippy \
+            --cov-report=term-missing \
+            --cov-fail-under=80 \
+            $EXTRA_ARGS
+
+      - name: Upload test artifacts
+        if: always() && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7
+        with:
+          name: test-metrics
+          path: |
+            coverage.xml
+            test-results.xml
+          retention-days: 5
+
+      - name: Check quality gate
+        if: matrix.python-version == '3.12'
+        run: uv run python scripts/quality_gate.py check
 
   lint:
     runs-on: ubuntu-latest
@@ -120,3 +141,160 @@ jobs:
           name: pip-audit-report
           path: pip-audit-report.json
           retention-days: 30
+
+  quality-gate-bump:
+    name: Bump quality gate
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download test metrics
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4
+        with:
+          name: test-metrics
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Bump quality gate
+        run: uv run python scripts/quality_gate.py update
+
+      - name: Generate coverage badge
+        run: |
+          COV=$(uv run python -c "
+          import defusedxml.ElementTree as DET
+          t = DET.parse('coverage.xml')
+          print(int(float(t.getroot().attrib['line-rate']) * 100))
+          ")
+          if [ "$COV" -ge 90 ]; then COLOR="brightgreen";
+          elif [ "$COV" -ge 80 ]; then COLOR="green";
+          elif [ "$COV" -ge 70 ]; then COLOR="yellowgreen";
+          else COLOR="red"; fi
+          mkdir -p .github/badges
+          curl -s "https://img.shields.io/badge/coverage-${COV}%25-${COLOR}" > .github/badges/coverage.svg
+
+      - name: Commit gate + badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/quality-gate.json .github/badges/coverage.svg
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: update quality gate and coverage badge [skip ci]"
+          git push
+
+  test-file-parity:
+    name: Test file parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check test parity
+        run: python scripts/check_test_parity.py check
+
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install semgrep
+        run: pipx install semgrep
+
+      - name: Run semgrep
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/owasp-top-ten \
+            --sarif \
+            --output semgrep-results.sarif \
+            src/
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@89a39a4e59826350b863aa6b6252a07ad50cf83e  # v4.32.4
+        with:
+          sarif_file: semgrep-results.sarif
+
+  thread-safety:
+    name: Thread safety scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Check for unprotected module-level mutables
+        run: |
+          echo "Scanning for module-level mutable globals without Lock protection..."
+          FOUND=0
+          for f in src/grippy/*.py; do
+            # Match top-level dict/list assignments (no leading whitespace)
+            if grep -Pn '^[A-Z_]+\s*[:=].*\b(dict|list|\{\}|\[\])\b' "$f" 2>/dev/null; then
+              # Check if the same file has a Lock import/usage
+              if ! grep -q 'Lock\|RLock' "$f"; then
+                echo "WARNING: $f has module-level mutables without Lock protection"
+                FOUND=1
+              fi
+            fi
+          done
+          if [ "$FOUND" -eq 1 ]; then
+            echo ""
+            echo "::warning::Found module-level mutable globals without Lock protection (non-blocking)"
+          else
+            echo "No unprotected module-level mutables found."
+          fi

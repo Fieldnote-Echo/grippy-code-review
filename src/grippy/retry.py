@@ -32,6 +32,19 @@ class ReviewParseError(Exception):
         )
 
 
+def _safe_error_summary(e: ValidationError) -> str:
+    """Extract only field paths and error type codes from a ValidationError.
+
+    Never echoes raw values — prevents attacker-controlled PR content from
+    being injected into retry prompts as untagged instructions.
+    """
+    parts: list[str] = []
+    for err in e.errors():
+        loc = ".".join(str(loc) for loc in err["loc"])
+        parts.append(f"{loc}: {err['type']}")
+    return "; ".join(parts)
+
+
 def _strip_markdown_fences(text: str) -> str:
     """Remove markdown code fences wrapping JSON."""
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
@@ -109,9 +122,18 @@ def run_review(
                 on_validation_error(attempt, e)
 
             if attempt <= max_retries:
+                if isinstance(e, ValidationError):
+                    safe_summary = _safe_error_summary(e)
+                elif isinstance(e, json.JSONDecodeError):
+                    safe_summary = "JSON decode error"
+                elif isinstance(e, TypeError):
+                    safe_summary = "Unexpected response type"
+                else:
+                    safe_summary = "Value error in response"
+
                 current_message = (
                     f"Your previous output failed validation. "
-                    f"Error: {error_str}\n\n"
+                    f"Error: {safe_summary}\n\n"
                     f"Please fix the errors and output a valid JSON object "
                     f"matching the GrippyReview schema. Output ONLY the JSON."
                 )

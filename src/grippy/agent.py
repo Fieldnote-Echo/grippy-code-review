@@ -17,6 +17,11 @@ from grippy.schema import GrippyReview
 DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompts_data"
 
 
+def _escape_xml(text: str) -> str:
+    """Escape XML delimiters to prevent prompt injection via PR metadata."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 _VALID_TRANSPORTS = {"openai", "local"}
 
 
@@ -180,10 +185,10 @@ def format_pr_context(
 
     sections.append(
         f"<pr_metadata>\n"
-        f"Title: {title}\n"
-        f"Author: {author}\n"
-        f"Branch: {branch}\n"
-        f"Description: {description}\n"
+        f"Title: {_escape_xml(title)}\n"
+        f"Author: {_escape_xml(author)}\n"
+        f"Branch: {_escape_xml(branch)}\n"
+        f"Description: {_escape_xml(description)}\n"
         f"Labels: {labels}\n"
         f"Changed Files: {changed_files}\n"
         f"Additions: {additions}\n"
