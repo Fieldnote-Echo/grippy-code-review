@@ -125,17 +125,20 @@ All configuration is through environment variables. No config files required.
 | `pr_review` | Default on PR events | Full code review: correctness, security, style, maintainability |
 | `security_audit` | Manual or scheduled | Deep security analysis: injection, auth, cryptography, data exposure |
 | `governance_check` | Manual or scheduled | Compliance and policy: licensing, access control, audit trails |
-| `surprise_audit` | Manual | Unannounced review with heightened scrutiny and unpredictable focus |
+| `surprise_audit` | PR title/body contains "production ready" | Full-scope audit with expanded governance checks |
 | `cli` | Local invocation | Interactive review for local development and testing |
 | `github_app` | GitHub App webhook | Event-driven review via installed GitHub App |
 
 ## Documentation
 
-- [Getting Started](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Getting-Started)
-- [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide)
-- [Review Modes](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Review-Modes)
-- [Architecture](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Architecture)
-- [Contributing](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Contributing)
+- [Getting Started](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Getting-Started) — Setup for OpenAI, local LLMs, and development
+- [Configuration](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Configuration) — Environment variables and model options
+- [Architecture](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Architecture) — Module map, prompt system, data flow
+- [Review Modes](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Review-Modes) — The 6 review modes and how they work
+- [Scoring Rubric](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Scoring-Rubric) — How Grippy scores PRs
+- [Security Model](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Security-Model) — Codebase tool protections, hardened CI
+- [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) — Ollama/LM Studio + Cloudflare Tunnel
+- [Contributing](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Contributing) — Dev setup, testing, conventions
 
 ## License
 
