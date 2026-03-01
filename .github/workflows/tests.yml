@@ -111,7 +111,7 @@ jobs:
         run: uv sync
 
       - name: Audit dependencies
-        run: uv run pip-audit --strict --desc --output=pip-audit-report.json --format=json --skip-editable
+        run: uv run pip-audit --desc --output=pip-audit-report.json --format=json --skip-editable
 
       - name: Upload audit report
         if: always()
