@@ -23,6 +23,27 @@ SKIP_FILES = {"__init__.py", "__main__.py"}
 
 MIN_LOC = 50
 
+# Subpackages: explicit test map overrides default naming
+SUBPACKAGE_PARITY: dict[str, dict[str, Path | str | set[str] | dict[str, str]]] = {
+    "rules": {
+        "src": SRC_DIR / "rules",
+        "test_prefix": "test_grippy_rule_",
+        "skip": {"__init__.py", "registry.py"},
+        "test_map": {
+            "base": "skip",
+            "context": "test_grippy_rules_context.py",
+            "engine": "test_grippy_rules_engine.py",
+            "config": "test_grippy_rules_config.py",
+            "workflow_permissions": "test_grippy_rule_workflow.py",
+            "secrets_in_diff": "test_grippy_rule_secrets.py",
+            "dangerous_sinks": "test_grippy_rule_sinks.py",
+            "path_traversal": "test_grippy_rule_traversal.py",
+            "llm_output_sinks": "test_grippy_rule_llm.py",
+            "ci_script_risk": "test_grippy_rule_ci.py",
+        },
+    },
+}
+
 
 def _load_gate() -> dict[str, int | float]:
     with open(GATE_PATH, encoding="utf-8") as f:
@@ -59,6 +80,7 @@ def find_violations() -> list[str]:
     parity_map = _load_parity_map()
     violations = []
 
+    # Top-level src/grippy/*.py
     for src_file in sorted(SRC_DIR.glob("*.py")):
         if src_file.name in SKIP_FILES:
             continue
@@ -80,6 +102,39 @@ def find_violations() -> list[str]:
 
         if not test_file.exists():
             violations.append(f"{src_file.name} ({loc} LOC) -> missing {test_file.name}")
+
+    # Subpackages (e.g. rules/)
+    for pkg_name, pkg_config in SUBPACKAGE_PARITY.items():
+        src_path = Path(str(pkg_config["src"]))
+        test_prefix = str(pkg_config["test_prefix"])
+        skip_files = set(pkg_config.get("skip", set()))  # type: ignore[arg-type]
+        test_map: dict[str, str] = pkg_config.get("test_map", {})  # type: ignore[assignment]
+
+        if not src_path.is_dir():
+            continue
+
+        for src_file in sorted(src_path.glob("*.py")):
+            if src_file.name in SKIP_FILES or src_file.name in skip_files:
+                continue
+
+            loc = _count_loc(src_file)
+            if loc < MIN_LOC:
+                continue
+
+            stem = src_file.stem
+
+            # Check test_map for explicit overrides
+            if stem in test_map:
+                if test_map[stem] == "skip":
+                    continue
+                test_file = TEST_DIR / test_map[stem]
+            else:
+                test_file = TEST_DIR / f"{test_prefix}{stem}.py"
+
+            if not test_file.exists():
+                violations.append(
+                    f"{pkg_name}/{src_file.name} ({loc} LOC) -> missing {test_file.name}"
+                )
 
     return violations
 

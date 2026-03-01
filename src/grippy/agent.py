@@ -96,6 +96,8 @@ def create_reviewer(
     # Phase 3: codebase search
     tools: list[Any] | None = None,
     tool_call_limit: int | None = None,
+    # Security rule engine
+    include_rule_findings: bool = False,
 ) -> Agent:
     """Create a Grippy review agent.
 
@@ -153,7 +155,11 @@ def create_reviewer(
         name="grippy",
         model=model,
         description=load_identity(prompts_dir),
-        instructions=load_instructions(prompts_dir, mode=mode),
+        instructions=load_instructions(
+            prompts_dir,
+            mode=mode,
+            include_rule_findings=include_rule_findings,
+        ),
         output_schema=GrippyReview,
         markdown=False,
         **kwargs,
@@ -171,6 +177,7 @@ def format_pr_context(
     file_context: str = "",
     governance_rules: str = "",
     learnings: str = "",
+    rule_findings: str = "",
 ) -> str:
     """Format PR context as the user message, matching pr-review.md input format."""
     sections = []
@@ -203,5 +210,8 @@ def format_pr_context(
 
     if learnings:
         sections.append(f"<learnings>\n{learnings}\n</learnings>")
+
+    if rule_findings:
+        sections.append(f"<rule_findings>\n{rule_findings}\n</rule_findings>")
 
     return "\n\n".join(sections)

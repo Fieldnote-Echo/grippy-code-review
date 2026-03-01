@@ -43,6 +43,7 @@ The main flow runs in CI via `python -m grippy` (`__main__.py` → `review.main(
 
 ```
 PR event (GITHUB_EVENT_PATH) → load PR metadata + diff
+  → run_rules() (rules/) — deterministic security rule engine (when profile != general)
   → create_reviewer() (agent.py) — Agno agent with prompt chain + tools
   → CodebaseIndex.index() (codebase.py) — embed repo into LanceDB
   → run_review() (retry.py) — run agent with structured output validation + retry
@@ -61,6 +62,7 @@ PR event (GITHUB_EVENT_PATH) → load PR metadata + diff
 - **persistence.py** — `GrippyStore` with dual backends: SQLite for edges, LanceDB for node embeddings. Stores the codebase knowledge graph. Includes migration support.
 - **retry.py** — `run_review()` wraps agent execution with JSON parsing (raw, dict, markdown-fenced) and Pydantic validation, retrying on failure with error feedback.
 - **prompts.py** — Loads and composes 21 markdown prompt files from `prompts_data/`. Chain: identity (CONSTITUTION + PERSONA) → mode-specific instructions → shared quality gates → suffix (rubric + output schema).
+- **rules/** — Deterministic security rule engine. 6 rules scan diffs for secrets, dangerous sinks, workflow permissions, path traversal, LLM output sinks, and CI script risks. Feature-flagged via `GRIPPY_PROFILE` env var / `--profile` CLI flag. Profiles: `general` (rules off), `security` (fail on ERROR+), `strict-security` (fail on WARN+).
 - **embedder.py** — Embedder factory for OpenAI-compatible embedding models.
 
 ### Prompt System
@@ -92,6 +94,7 @@ Review modes: `pr_review`, `security_audit`, `governance_check`, `surprise_audit
 | `GRIPPY_API_KEY` | API key for non-OpenAI endpoints | — |
 | `GRIPPY_DATA_DIR` | Persistence directory | `./grippy-data` |
 | `GRIPPY_TIMEOUT` | Review timeout in seconds (0 = none) | `0` |
+| `GRIPPY_PROFILE` | Security profile: `general`, `security`, `strict-security` | `general` |
 | `OPENAI_API_KEY` | OpenAI API key (when transport=openai) | — |
 | `GITHUB_TOKEN` | GitHub API access for PR operations | — |
 | `GITHUB_EVENT_PATH` | Path to PR event JSON (set by Actions) | — |

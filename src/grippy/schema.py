@@ -105,6 +105,7 @@ class Finding(BaseModel):
     description: str = Field(max_length=2000)
     suggestion: str = Field(max_length=1000)
     governance_rule_id: str | None = None
+    rule_id: str | None = None
     evidence: str = Field(max_length=1000)
     grippy_note: str = Field(max_length=280)
 

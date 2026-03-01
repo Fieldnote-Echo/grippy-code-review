@@ -82,12 +82,22 @@ def _parse_response(content: Any) -> GrippyReview:
     raise TypeError(msg)
 
 
+def _validate_rule_coverage(
+    review: GrippyReview,
+    expected_rule_ids: set[str],
+) -> list[str]:
+    """Return rule_ids missing from findings. Checks Finding.rule_id field."""
+    found_ids = {f.rule_id for f in review.findings if f.rule_id}
+    return sorted(expected_rule_ids - found_ids)
+
+
 def run_review(
     agent: Any,
     message: str,
     *,
     max_retries: int = 3,
     on_validation_error: Callable[[int, Exception], None] | None = None,
+    expected_rule_ids: set[str] | None = None,
 ) -> GrippyReview:
     """Run a review with structured output validation and retry.
 
@@ -113,7 +123,20 @@ def run_review(
         last_raw = str(content)[:2000] if content is not None else "<None>"
 
         try:
-            return _parse_response(content)
+            review = _parse_response(content)
+            # Post-parse rule coverage validation
+            if expected_rule_ids:
+                missing = _validate_rule_coverage(review, expected_rule_ids)
+                if missing and attempt <= max_retries:
+                    error_str = f"Missing rule findings: {', '.join(missing)}"
+                    errors.append(f"Attempt {attempt}: {error_str}")
+                    current_message = (
+                        f"Your output is missing findings for these rule-detected issues: "
+                        f"{', '.join(missing)}. "
+                        f"Every rule finding MUST appear with its rule_id set."
+                    )
+                    continue
+            return review
         except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as e:
             error_str = str(e)
             errors.append(f"Attempt {attempt}: {error_str}")
