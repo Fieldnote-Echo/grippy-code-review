@@ -17,13 +17,17 @@ from grippy.graph import (
     EdgeType,
     NodeType,
 )
-from grippy.persistence import GrippyStore
 from grippy.retry import ReviewParseError, run_review
 from grippy.review import (
     load_pr_event,
     truncate_diff,
 )
 from grippy.schema import GrippyReview
+
+try:
+    from grippy.persistence import GrippyStore
+except ImportError:  # lancedb not installed (optional [persistence] extra)
+    GrippyStore = None  # type: ignore[assignment,misc]
 
 __all__ = [
     "CodebaseIndex",

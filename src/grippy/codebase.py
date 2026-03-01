@@ -153,7 +153,7 @@ def chunk_file(
     Returns:
         List of chunk dicts: {file_path, chunk_index, start_line, end_line, text}.
     """
-    # Clamp overlap to prevent infinite loop (Grippy finding ce876a2c4097)
+    # Clamp overlap to prevent infinite loop
     if overlap >= max_chunk_chars:
         overlap = max(0, max_chunk_chars - 1)
 

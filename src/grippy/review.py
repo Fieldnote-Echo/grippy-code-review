@@ -119,7 +119,7 @@ def fetch_pr_diff(token: str, repo: str, pr_number: int) -> str:
     """Fetch complete PR diff via GitHub API raw diff endpoint.
 
     Uses Accept: application/vnd.github.v3.diff to get the full unified
-    diff in a single request — no pagination issues (C1 fix).
+    diff in a single request — no pagination issues.
     """
     import requests
 
@@ -291,7 +291,7 @@ def main(*, profile: str | None = None) -> None:
         except Exception as exc:
             print(f"::warning::Codebase indexing failed (non-fatal): {exc}")
 
-    # 3. Fetch diff (M2: graceful 403 handling for fork PRs)
+    # 3. Fetch diff (graceful 403 handling for fork PRs)
     print("Fetching PR diff...")
     try:
         diff = fetch_pr_diff(token, pr_event["repo"], pr_event["pr_number"])

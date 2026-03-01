@@ -23,8 +23,6 @@ PROFILES: dict[str, ProfileConfig] = {
     "strict-security": ProfileConfig(name="strict-security", fail_on=RuleSeverity.WARN),
 }
 
-VALID_PROFILES = frozenset(PROFILES.keys())
-
 
 def load_profile(cli_profile: str | None = None) -> ProfileConfig:
     """Load profile config with CLI > env > default priority.
