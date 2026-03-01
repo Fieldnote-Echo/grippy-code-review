@@ -24,7 +24,7 @@ Grippy reviews pull requests using any OpenAI-compatible model — GPT, Claude, 
 
 An inline finding on a PR diff:
 
-> **CRITICAL** | `security` | confidence: 0.95
+> **CRITICAL** | `security` | confidence: 95
 >
 > **SQL injection via string interpolation**
 >
@@ -90,7 +90,7 @@ jobs:
 
 ### GitHub Actions (self-hosted LLM)
 
-Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. We recommend **Devstral-Small 24B at Q4 quantization or higher** — that's what Grippy was validated with for local inference. See the [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full setup instructions.
+Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. We recommend **Devstral-Small 24B at Q4 quantization or higher** — tested during development for structured output compliance and review quality. See the [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full setup instructions.
 
 ### Local development
 
@@ -104,7 +104,7 @@ pip install "grippy-code-review[persistence]"
 
 ## Configuration
 
-All configuration is through environment variables. No config files required.
+Grippy is configured entirely through environment variables.
 
 | Variable | Purpose | Default |
 |---|---|---|
