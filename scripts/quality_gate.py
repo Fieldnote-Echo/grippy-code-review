@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # nosec B405 — parses trusted CI-generated XML only
 from pathlib import Path
 
 GATE_PATH = Path(__file__).resolve().parent.parent / ".github" / "quality-gate.json"
@@ -32,7 +32,7 @@ def _save_gate(gate: dict[str, int | float]) -> None:
 
 def _parse_coverage() -> float:
     """Parse line coverage percentage from coverage.xml."""
-    tree = ET.parse(COVERAGE_XML)
+    tree = ET.parse(COVERAGE_XML)  # nosec B314
     root = tree.getroot()
     rate = float(root.attrib["line-rate"])
     return round(rate * 100, 1)
@@ -44,7 +44,7 @@ def _parse_test_count() -> int:
     Handles both <testsuites><testsuite tests="N"> (pytest default)
     and <testsuite tests="N"> root formats.
     """
-    tree = ET.parse(TEST_RESULTS_XML)
+    tree = ET.parse(TEST_RESULTS_XML)  # nosec B314
     root = tree.getroot()
     if "tests" in root.attrib:
         return int(root.attrib["tests"])
