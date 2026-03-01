@@ -31,12 +31,12 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
-          token: ${{ secrets.SCORECARD_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BADGE_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Run Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a  # v2.4.3
         with:
-          repo_token: ${{ secrets.SCORECARD_TOKEN || secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.BADGE_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
           results_file: results.sarif
           results_format: sarif
           publish_results: false
@@ -49,7 +49,7 @@ jobs:
       - name: Run Scorecard (JSON for badge)
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a  # v2.4.3
         with:
-          repo_token: ${{ secrets.SCORECARD_TOKEN || secrets.GITHUB_TOKEN }}
+          repo_token: ${{ secrets.BADGE_PUSH_TOKEN || secrets.GITHUB_TOKEN }}
           results_file: results.json
           results_format: json
           publish_results: false
