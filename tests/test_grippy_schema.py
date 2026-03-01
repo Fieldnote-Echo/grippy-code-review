@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy Pydantic schema models."""
 
 from __future__ import annotations

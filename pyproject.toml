@@ -39,6 +39,9 @@ dev = [
     "mypy>=1.8.0",
     "lancedb>=0.20.0",
     "types-requests>=2.32.4.20260107",
+    "pre-commit>=4.0.0",
+    "bandit>=1.9.0",
+    "pip-audit>=2.7.0",
 ]
 
 [tool.ruff]
@@ -59,3 +62,13 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+
+[tool.bandit]
+targets = ["src/grippy"]
+exclude_dirs = ["tests"]
+skips = [
+    "B101",  # assert used — fine in production code for invariants
+    "B404",  # import subprocess — needed for git/gh CLI calls
+    "B603",  # subprocess without shell=True — this is the SECURE pattern
+    "B607",  # partial executable path — git/gh are standard CLI tools
+]

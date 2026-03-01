@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy agent utilities (format_pr_context)."""
 
 from __future__ import annotations

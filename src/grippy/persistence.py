@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Graph-aware persistence — SQLite for nodes/edges, LanceDB for vectors.
 
 Stores codebase knowledge data (not finding lifecycle — that's GitHub's job):

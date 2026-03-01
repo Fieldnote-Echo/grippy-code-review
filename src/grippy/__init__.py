@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Grippy — the reluctant code inspector. Agno-based AI code review agent."""
 
 from grippy.agent import create_reviewer

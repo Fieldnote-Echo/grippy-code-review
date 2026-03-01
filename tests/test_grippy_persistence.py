@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy persistence layer — SQLite graph + LanceDB vectors."""
 
 from __future__ import annotations

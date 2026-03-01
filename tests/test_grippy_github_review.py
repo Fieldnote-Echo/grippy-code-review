@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy GitHub Review API integration."""
 
 from __future__ import annotations

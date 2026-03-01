@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Embedder factory — selects Agno embedder based on transport mode."""
 
 from __future__ import annotations

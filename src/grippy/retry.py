@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Structured output retry wrapper for Grippy reviews.
 
 Parses agent output into GrippyReview, retrying with validation error

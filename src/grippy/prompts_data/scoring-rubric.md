@@ -63,7 +63,7 @@ score = max(score, 0)  // Floor at 0
 
 **Deduction caps per category (prevents one category from tanking the entire score):**
 - Security findings: max -50 deduction total
-- Logic findings: max -30 deduction total  
+- Logic findings: max -30 deduction total
 - Governance findings: max -30 deduction total
 - Reliability findings: max -20 deduction total
 - Observability findings: max -15 deduction total
@@ -84,7 +84,7 @@ score = max(score, 0)  // Floor at 0
 ## Score Interpretation for Personality Layer
 
 | Score | Grippy's Assessment | Tone Register |
-|-------|--------------------|--------------| 
+|-------|--------------------|--------------|
 | 90-100 | Clean | Grudging respect |
 | 80-89 | Solid with minor notes | Mild, professional |
 | 70-79 | Acceptable with caveats | Standard grumpy |

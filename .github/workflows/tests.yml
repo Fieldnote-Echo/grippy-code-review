@@ -23,6 +23,11 @@ jobs:
         python-version: ["3.12", "3.13"]
 
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Set up Python
@@ -31,13 +36,15 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: uv sync
 
       - name: Run tests
-        run: uv run pytest tests/ -v --cov=src/grippy --cov-report=term-missing
+        run: uv run pytest tests/ -v --cov=src/grippy --cov-report=term-missing --cov-fail-under=80
 
   lint:
     runs-on: ubuntu-latest
@@ -45,6 +52,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Set up Python
@@ -53,7 +65,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: uv sync
@@ -66,3 +80,43 @@ jobs:
 
       - name: Type check
         run: uv run mypy src/grippy/
+
+      - name: Security scan
+        run: uv run bandit -c pyproject.toml -r src/grippy/
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Audit dependencies
+        run: uv run pip-audit --desc --output=pip-audit-report.json --format=json --skip-editable
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 30

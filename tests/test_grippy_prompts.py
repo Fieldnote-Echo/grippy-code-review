@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy prompt chain loaders."""
 
 from __future__ import annotations

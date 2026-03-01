@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy embedder factory."""
 
 from __future__ import annotations

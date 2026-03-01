@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Tests for Grippy graph enums."""
 
 from __future__ import annotations

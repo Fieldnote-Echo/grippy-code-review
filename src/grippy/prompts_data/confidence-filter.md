@@ -69,7 +69,7 @@ If `learnings` data is provided (past feedback for this repository):
 When running Stage 3 as an LLM pass (recommended for high-value reviews):
 
 ```
-You are a verification agent. Your job is to check whether the following 
+You are a verification agent. Your job is to check whether the following
 code review findings are accurate.
 
 For each finding, verify:
