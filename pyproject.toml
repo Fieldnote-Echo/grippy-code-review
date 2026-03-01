@@ -25,6 +25,7 @@ dependencies = [
     "PyGithub>=2.1.0",
     "requests>=2.28.0",
     "sqlalchemy>=2.0.0",
+    "navi-sanitize>=0.1.0",
     "nh3>=0.2.0",
 ]
 

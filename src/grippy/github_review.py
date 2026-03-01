@@ -11,6 +11,7 @@ import re
 import subprocess
 from typing import Any
 
+import navi_sanitize
 import nh3
 from github import Github, GithubException
 
@@ -131,22 +132,18 @@ _DANGEROUS_SCHEME_RE = re.compile(
 
 
 def _sanitize_comment_text(text: str) -> str:
-    """Sanitize LLM-generated text using allowlist-based HTML cleaning.
+    """Sanitize LLM-generated text — Unicode normalization + HTML cleaning.
 
-    Uses nh3 (Rust-based HTML sanitizer) instead of a regex blocklist.
-    Strips all HTML tags from free-text fields — only standard markdown
-    syntax (bold, italic, code spans, etc.) is preserved. A second pass
-    neutralizes dangerous URL schemes in markdown link syntax.
-
-    This is defense-in-depth: GitHub's own renderer also sanitizes, but
-    we neutralize injection attempts before they ever reach the API.
+    Pipeline: navi-sanitize (invisible chars, homoglyphs, bidi) → nh3
+    (HTML tag stripping) → dangerous URL scheme removal.
 
     Args:
         text: Raw text from an LLM-generated field.
 
     Returns:
-        Cleaned text with HTML tags removed and dangerous schemes stripped.
+        Cleaned text safe for GitHub comment posting.
     """
+    text = navi_sanitize.clean(text)
     text = nh3.clean(text, tags=set())
     text = _DANGEROUS_SCHEME_RE.sub("", text)
     return text
@@ -166,7 +163,8 @@ _GRIPPY_MARKER_RE = re.compile(r"<!-- grippy:(?P<file>[^:]+):(?P<category>[^:]+)
 
 
 def _sanitize_path(path: str) -> str:
-    """Strip characters that could break HTML comment markers or inject content."""
+    """Sanitize file paths — Unicode normalization + traversal removal + allowlist."""
+    path = navi_sanitize.clean(path, escaper=navi_sanitize.path_escaper)
     return re.sub(r"[^a-zA-Z0-9_./ -]", "", path)
 
 
