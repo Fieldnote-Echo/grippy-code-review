@@ -51,8 +51,8 @@ def _parse_test_count() -> int:
     root = tree.getroot()
     if "tests" in root.attrib:
         return int(root.attrib["tests"])
-    # pytest wraps in <testsuites>, sum child <testsuite> counts
-    suites = root.findall("testsuite")
+    # pytest wraps in <testsuites>, sum all <testsuite> counts (deep search)
+    suites = root.findall(".//testsuite")
     if not suites:
         print(
             "ERROR: test-results.xml has no 'tests' attribute and no <testsuite> elements",
