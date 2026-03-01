@@ -170,17 +170,28 @@ _SEVERITY_MAP: dict[RuleSeverity, str] = {
 }
 
 
+def _escape_rule_field(text: str) -> str:
+    """Escape XML delimiters in rule finding fields to prevent prompt injection.
+
+    Crafted filenames or evidence strings could contain XML/prompt-injection
+    payloads (e.g. ``</rule_findings><system>``). Escaping neutralizes them.
+    """
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _format_rule_findings(results: list[RuleResult]) -> str:
     """Format rule findings as text for the LLM context."""
     lines: list[str] = []
     for r in results:
         sev = _SEVERITY_MAP.get(r.severity, "INFO")
-        parts = [f"[{sev}] {r.rule_id} @ {r.file}"]
+        file_safe = _escape_rule_field(r.file)
+        msg_safe = _escape_rule_field(r.message)
+        parts = [f"[{sev}] {r.rule_id} @ {file_safe}"]
         if r.line is not None:
             parts[0] += f":{r.line}"
-        parts[0] += f": {r.message}"
+        parts[0] += f": {msg_safe}"
         if r.evidence:
-            parts.append(f"  evidence: {r.evidence}")
+            parts.append(f"  evidence: {_escape_rule_field(r.evidence)}")
         lines.append(" | ".join(parts) if r.evidence else parts[0])
     return "\n".join(lines)
 
@@ -304,14 +315,7 @@ def main(*, profile: str | None = None) -> None:
     file_count = diff.count("diff --git")
     print(f"  {file_count} files, {len(diff)} chars")
 
-    # H2: cap diff size to avoid overflowing LLM context
-    original_len = len(diff)
-    diff = truncate_diff(diff)
-    diff_truncated = len(diff) < original_len
-    if diff_truncated:
-        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
-
-    # 3b. Run security rule engine (when profile != general)
+    # 3b. Run security rule engine on FULL diff (before truncation)
     profile_config = load_profile(cli_profile=profile)
     rule_findings: list[RuleResult] = []
     rule_gate_failed = False
@@ -327,6 +331,13 @@ def main(*, profile: str | None = None) -> None:
             rule_findings_text = _format_rule_findings(rule_findings)
             expected_rule_ids = {r.rule_id for r in rule_findings}
         mode = "security_audit"
+
+    # H2: cap diff size to avoid overflowing LLM context (after rule engine)
+    original_len = len(diff)
+    diff = truncate_diff(diff)
+    diff_truncated = len(diff) < original_len
+    if diff_truncated:
+        print(f"  Diff truncated to {MAX_DIFF_CHARS} chars ({file_count} files in original)")
 
     # 3c. Create agent (after rule engine, so mode/rule_findings are resolved)
     try:

@@ -8,8 +8,8 @@ import re
 from grippy.rules.base import RuleResult, RuleSeverity
 from grippy.rules.context import ChangedFile, DiffHunk, DiffLine, RuleContext
 
-_WORKFLOW_GLOB = ".github/workflows/*.yml"
 _WORKFLOW_PREFIX = ".github/workflows/"
+_WORKFLOW_EXTENSIONS = (".yml", ".yaml")
 
 # SHA pinning: uses: org/action@<40-hex-chars>
 _SHA_PIN_RE = re.compile(r"@[0-9a-f]{40}\b")
@@ -52,7 +52,7 @@ class WorkflowPermissionsRule:
     def run(self, ctx: RuleContext) -> list[RuleResult]:
         results: list[RuleResult] = []
         for f in ctx.files:
-            if not f.path.startswith(_WORKFLOW_PREFIX) or not f.path.endswith(".yml"):
+            if not f.path.startswith(_WORKFLOW_PREFIX) or not f.path.endswith(_WORKFLOW_EXTENSIONS):
                 continue
             for hunk in f.hunks:
                 results.extend(self._scan_hunk(f, hunk))

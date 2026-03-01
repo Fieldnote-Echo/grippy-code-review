@@ -127,15 +127,24 @@ def run_review(
             # Post-parse rule coverage validation
             if expected_rule_ids:
                 missing = _validate_rule_coverage(review, expected_rule_ids)
-                if missing and attempt <= max_retries:
+                if missing:
                     error_str = f"Missing rule findings: {', '.join(missing)}"
                     errors.append(f"Attempt {attempt}: {error_str}")
-                    current_message = (
-                        f"Your output is missing findings for these rule-detected issues: "
-                        f"{', '.join(missing)}. "
-                        f"Every rule finding MUST appear with its rule_id set."
+                    if attempt <= max_retries:
+                        current_message = (
+                            f"Your output is missing findings for these rule-detected issues: "
+                            f"{', '.join(missing)}. "
+                            f"Every rule finding MUST appear with its rule_id set."
+                        )
+                        continue
+                    # Final attempt still missing — warn but return what we have
+                    import warnings
+
+                    warnings.warn(
+                        f"Rule coverage incomplete after {attempt} attempts: "
+                        f"missing {', '.join(missing)}",
+                        stacklevel=2,
                     )
-                    continue
             return review
         except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as e:
             error_str = str(e)
