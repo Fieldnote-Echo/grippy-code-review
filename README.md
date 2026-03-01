@@ -90,7 +90,7 @@ jobs:
 
 ### GitHub Actions (self-hosted LLM)
 
-Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. See the [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full workflow examples.
+Grippy works with any OpenAI-compatible API endpoint, including Ollama, LM Studio, and vLLM. We recommend **Devstral-Small 24B at Q4 quantization or higher** — that's what Grippy was validated with for local inference. See the [Self-Hosted LLM Guide](https://github.com/Fieldnote-Echo/grippy-code-review/wiki/Self-Hosted-LLM-Guide) on the wiki for full setup instructions.
 
 ### Local development
 
