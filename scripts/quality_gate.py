@@ -34,8 +34,11 @@ def _parse_coverage() -> float:
     """Parse line coverage percentage from coverage.xml."""
     tree = ET.parse(COVERAGE_XML)  # nosec B314
     root = tree.getroot()
-    rate = float(root.attrib["line-rate"])
-    return round(rate * 100, 1)
+    rate_str = root.attrib.get("line-rate")
+    if rate_str is None:
+        print("ERROR: coverage.xml missing 'line-rate' attribute on root element", file=sys.stderr)
+        sys.exit(1)
+    return round(float(rate_str) * 100, 1)
 
 
 def _parse_test_count() -> int:
@@ -49,10 +52,14 @@ def _parse_test_count() -> int:
     if "tests" in root.attrib:
         return int(root.attrib["tests"])
     # pytest wraps in <testsuites>, sum child <testsuite> counts
-    total = 0
-    for suite in root.findall("testsuite"):
-        total += int(suite.attrib.get("tests", 0))
-    return total
+    suites = root.findall("testsuite")
+    if not suites:
+        print(
+            "ERROR: test-results.xml has no 'tests' attribute and no <testsuite> elements",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return sum(int(s.attrib.get("tests", 0)) for s in suites)
 
 
 def check() -> bool:
