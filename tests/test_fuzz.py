@@ -21,8 +21,9 @@ from grippy.rules.context import ChangedFile, DiffLine, parse_diff
 # Strategies for generating realistic-ish diff text
 # ---------------------------------------------------------------------------
 
-# CI runs 10k examples; set FUZZ_SLOW=1 for 50k (local deep run)
-_MAX_EXAMPLES = 50_000 if os.environ.get("FUZZ_SLOW") else 10_000
+# CI runs 2k examples; FUZZ_SLOW=1 for 50k (local deep run).
+# Initial 10k spike across all 8 tests passed clean (80k total inputs).
+_MAX_EXAMPLES = 50_000 if os.environ.get("FUZZ_SLOW") else 2_000
 
 _PRINTABLE = st.text(alphabet=string.printable, min_size=0, max_size=200)
 
