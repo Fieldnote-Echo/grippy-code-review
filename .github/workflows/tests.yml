@@ -63,6 +63,10 @@ jobs:
             test-results.xml
           retention-days: 5
 
+      - name: Check quality gate
+        if: matrix.python-version == '3.12'
+        run: uv run python scripts/quality_gate.py check
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -138,38 +142,10 @@ jobs:
           path: pip-audit-report.json
           retention-days: 30
 
-  quality-gate:
-    name: Quality gate
-    needs: test
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b  # v2.15.0
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
-
-      - name: Download test metrics
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4
-        with:
-          name: test-metrics
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6
-        with:
-          python-version: "3.12"
-
-      - name: Check quality gate
-        run: python scripts/quality_gate.py check
-
   quality-gate-bump:
     name: Bump quality gate
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: quality-gate
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -194,14 +170,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
       - name: Bump quality gate
-        run: python scripts/quality_gate.py update
+        run: uv run python scripts/quality_gate.py update
 
       - name: Generate coverage badge
         run: |
-          COV=$(python -c "
-          import xml.etree.ElementTree as ET
-          t = ET.parse('coverage.xml')
+          COV=$(uv run python -c "
+          import defusedxml.ElementTree as DET
+          t = DET.parse('coverage.xml')
           print(int(float(t.getroot().attrib['line-rate']) * 100))
           ")
           if [ "$COV" -ge 90 ]; then COLOR="brightgreen";
