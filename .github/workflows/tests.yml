@@ -203,7 +203,7 @@ jobs:
           git add .github/quality-gate.json .github/badges/coverage.svg
           git diff --cached --quiet && exit 0
           git commit -m "chore: update quality gate and coverage badge [skip ci]"
-          git push
+          git push || echo "::warning::Push blocked by branch protection — badge update skipped"
 
   test-file-parity:
     name: Test file parity
