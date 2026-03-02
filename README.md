@@ -124,6 +124,10 @@ Grippy is configured entirely through environment variables.
 | `OPENAI_API_KEY` | OpenAI API key (sets transport to `openai`) | — |
 | `GITHUB_TOKEN` | GitHub API token (set automatically by Actions) | — |
 
+### Cross-vendor model selection
+
+If your codebase is co-developed with an AI coding assistant, **we strongly recommend running Grippy on a model from a different vendor** than the one that wrote the code. Different model families have different training data, different biases, and different blind spots. A reviewer that shares the same priors as the author is more likely to miss the same classes of bugs. Using a cross-vendor model — for example, reviewing GPT-authored code with Claude, or Claude-authored code with GPT — gives you a genuinely independent audit rather than an echo chamber.
+
 ## Security profiles
 
 Grippy's deterministic rule engine is controlled by profiles. Set via `GRIPPY_PROFILE` env var or `--profile` CLI flag (CLI takes priority).
