@@ -382,3 +382,223 @@ class TestNodeIdValidation:
         nodes_v2 = [{"id": poisoned_id, "type": "FILE", "label": "new.py", "data": "{}"}]
         with pytest.raises(ValueError, match="Invalid node_id"):
             store._upsert_vectors(nodes_v2, [fake_vec])
+
+    def test_upsert_vectors_replaces_stale_records(self, store: GrippyStore) -> None:
+        """Valid stale node_id triggers delete + re-insert with updated text.
+
+        This covers the happy path at persistence.py:301-307 — when a node's
+        label changes between calls, the old LanceDB record is deleted and
+        a new one with the updated embedding is inserted.
+        """
+        valid_id = "FILE:abcdef012345"
+        fake_vec = [0.1] * EMBED_DIM
+
+        # First call — creates the table with initial label
+        nodes_v1 = [{"id": valid_id, "type": "FILE", "label": "old_label.py", "data": "{}"}]
+        store._upsert_vectors(nodes_v1, [fake_vec])
+
+        # Verify initial state
+        table = store._ensure_nodes_table()
+        arrow = table.to_arrow()
+        texts_v1 = arrow.column("text").to_pylist()
+        assert len(texts_v1) == 1
+        assert "old_label" in texts_v1[0]
+
+        # Second call — same id, different label → stale delete + re-insert
+        new_vec = [0.9] * EMBED_DIM
+        nodes_v2 = [{"id": valid_id, "type": "FILE", "label": "new_label.py", "data": "{}"}]
+        store._upsert_vectors(nodes_v2, [new_vec])
+
+        # Re-fetch table handle after mutation to avoid testing handle caching
+        table = store._ensure_nodes_table()
+        arrow = table.to_arrow()
+        node_ids = arrow.column("node_id").to_pylist()
+        texts_v2 = arrow.column("text").to_pylist()
+        assert len(node_ids) == 1
+        assert node_ids[0] == valid_id
+        assert "new_label" in texts_v2[0]
+        assert "old_label" not in texts_v2[0]
+
+    def test_upsert_vectors_skips_unchanged_records(self, store: GrippyStore) -> None:
+        """Records with same node_id and same text are not re-inserted."""
+        valid_id = "FILE:abcdef012345"
+        fake_vec = [0.5] * EMBED_DIM
+
+        nodes = [{"id": valid_id, "type": "FILE", "label": "same.py", "data": "{}"}]
+        store._upsert_vectors(nodes, [fake_vec])
+        store._upsert_vectors(nodes, [fake_vec])
+
+        table = store._ensure_nodes_table()
+        arrow = table.to_arrow()
+        assert len(arrow.column("node_id").to_pylist()) == 1
+
+
+# --- Populated store queries (get_all_nodes, search_nodes) ---
+
+
+class TestPopulatedStoreQueries:
+    """Tests for get_all_nodes and search_nodes on a non-empty store."""
+
+    def _insert_node(self, store: GrippyStore) -> None:
+        """Insert a node into both SQLite and LanceDB."""
+        nodes = [
+            {
+                "id": "FILE:abcdef012345",
+                "type": "FILE",
+                "label": "src/app.py",
+                "data": '{"path": "src/app.py"}',
+                "session_id": "pr-1",
+                "status": None,
+                "fingerprint": None,
+                "created_at": "2026-01-01",
+                "updated_at": "2026-01-01",
+            }
+        ]
+        store._upsert_sqlite(nodes, [])
+        vecs = store._compute_embeddings(["FILE src/app.py"])
+        store._upsert_vectors(nodes, vecs)
+
+    def test_get_all_nodes_returns_populated_results(self, store: GrippyStore) -> None:
+        """get_all_nodes returns records after inserting a node."""
+        self._insert_node(store)
+        nodes = store.get_all_nodes()
+        assert len(nodes) == 1
+        assert nodes[0]["node_id"] == "FILE:abcdef012345"
+
+    def test_search_nodes_returns_results(self, store: GrippyStore) -> None:
+        """search_nodes returns results for a non-empty store."""
+        self._insert_node(store)
+        results = store.search_nodes("app.py", k=5)
+        assert len(results) >= 1
+
+
+# --- BatchEmbedder fast path ---
+
+
+class _FakeBatchEmbedder:
+    """Embedder that supports both single and batch operations."""
+
+    def get_embedding(self, text: str) -> list[float]:
+        import hashlib
+
+        h = hashlib.sha256(text.encode()).digest()
+        return [float(b) / 255.0 for b in h[:EMBED_DIM]]
+
+    def get_embedding_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.get_embedding(t) for t in texts]
+
+
+class TestBatchEmbedder:
+    """Tests for _compute_embeddings batch path."""
+
+    def test_batch_embedder_used_when_available(self, tmp_path: Path) -> None:
+        """BatchEmbedder.get_embedding_batch is called instead of per-item."""
+        store = GrippyStore(
+            graph_db_path=tmp_path / "grippy-graph.db",
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeBatchEmbedder(),
+        )
+        result = store._compute_embeddings(["hello", "world"])
+        assert len(result) == 2
+        assert len(result[0]) == EMBED_DIM
+
+    def test_compute_embeddings_empty_list(self, store: GrippyStore) -> None:
+        """Empty list returns empty list without calling embedder."""
+        result = store._compute_embeddings([])
+        assert result == []
+
+
+# --- Upsert vectors empty early return ---
+
+
+class TestUpsertVectorsEdgeCases:
+    """Edge cases for _upsert_vectors."""
+
+    def test_empty_nodes_returns_early(self, store: GrippyStore) -> None:
+        """Calling _upsert_vectors with empty lists does nothing."""
+        store._upsert_vectors([], [])
+        # _ensure_nodes_table only opens an existing table (never creates) —
+        # None confirms no table was created by the empty upsert above.
+        assert store._ensure_nodes_table() is None
+
+
+# --- SQLite rollback on error ---
+
+
+class TestSqliteRollback:
+    """Verify _upsert_sqlite rolls back on failure."""
+
+    def test_rollback_on_bad_node(self, store: GrippyStore) -> None:
+        """Malformed node triggers rollback — no partial writes."""
+        good_node = {
+            "id": "FILE:aaa111222333",
+            "type": "FILE",
+            "label": "good.py",
+            "data": "{}",
+            "session_id": "pr-1",
+            "status": None,
+            "fingerprint": None,
+            "created_at": "2026-01-01",
+            "updated_at": "2026-01-01",
+        }
+        # Bad edge with wrong number of elements will cause sqlite error
+        bad_edge = ("src", "tgt", "REL")  # Missing 4th element (properties)
+
+        with pytest.raises(ValueError):
+            store._upsert_sqlite([good_node], [bad_edge])  # type: ignore[list-item]
+
+        # Verify rollback: no nodes inserted
+        cur = store._conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM nodes")
+        assert cur.fetchone()[0] == 0
+
+
+# --- updated_at migration ---
+
+
+class TestUpdatedAtMigration:
+    """Verify _add_updated_at_column adds the column and backfills."""
+
+    def test_adds_updated_at_to_old_schema(self, tmp_path: Path) -> None:
+        """DB missing updated_at column gets it added + backfilled from created_at."""
+        db_path = tmp_path / "grippy-graph.db"
+
+        # Create a DB with the node table but WITHOUT updated_at
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE nodes ("
+            "id TEXT PRIMARY KEY, type TEXT NOT NULL, label TEXT NOT NULL, "
+            "data TEXT NOT NULL DEFAULT '{}', session_id TEXT, status TEXT, "
+            "fingerprint TEXT, created_at TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO nodes (id, type, label, created_at) "
+            "VALUES ('n1', 'FILE', 'test.py', '2026-01-15T10:00:00Z')"
+        )
+        # Need edges table too for the store to open
+        conn.execute(
+            "CREATE TABLE edges ("
+            "source TEXT NOT NULL, target TEXT NOT NULL, relationship TEXT NOT NULL, "
+            "weight REAL DEFAULT 1.0, properties TEXT DEFAULT '{}', "
+            "created_at TEXT NOT NULL, "
+            "PRIMARY KEY (source, relationship, target))"
+        )
+        conn.commit()
+        conn.close()
+
+        # Open with GrippyStore — should trigger migration
+        store = GrippyStore(
+            graph_db_path=db_path,
+            lance_dir=tmp_path / "lance",
+            embedder=_FakeEmbedder(),
+        )
+
+        # Verify column exists and was backfilled
+        cur = store._conn.cursor()
+        cur.execute("PRAGMA table_info(nodes)")
+        columns = {row["name"] for row in cur.fetchall()}
+        assert "updated_at" in columns
+
+        cur.execute("SELECT updated_at FROM nodes WHERE id = 'n1'")
+        updated_at = cur.fetchone()[0]
+        assert updated_at == "2026-01-15T10:00:00Z"

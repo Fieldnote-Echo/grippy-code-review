@@ -126,3 +126,51 @@ class TestRuleEngine:
         """Verify default engine loads all rules from the registry."""
         engine = RuleEngine()
         assert len(engine._rules) == 6
+
+
+# --- Convenience wrappers from grippy.rules.__init__ ---
+
+
+class TestConvenienceWrappers:
+    """Verify run_rules() and check_gate() wrappers in grippy.rules.__init__."""
+
+    def test_run_rules_returns_results(self) -> None:
+        """run_rules() parses diff, runs engine, returns results."""
+        from grippy.rules import run_rules
+        from grippy.rules.config import ProfileConfig
+
+        profile = ProfileConfig(name="security", fail_on=RuleSeverity.ERROR)
+        # A diff with no security issues should return empty or only low findings
+        diff = "diff --git a/readme.md b/readme.md\n--- a/readme.md\n+++ b/readme.md\n@@ -1 +1 @@\n-old\n+new\n"
+        results = run_rules(diff, profile)
+        assert isinstance(results, list)
+
+    def test_run_rules_detects_known_pattern(self) -> None:
+        """run_rules() detects a known security pattern (private key header)."""
+        from grippy.rules import run_rules
+        from grippy.rules.config import ProfileConfig
+
+        profile = ProfileConfig(name="security", fail_on=RuleSeverity.ERROR)
+        diff = (
+            "diff --git a/config.py b/config.py\n"
+            "--- a/config.py\n+++ b/config.py\n"
+            "@@ -1,1 +1,2 @@\n"
+            " # config\n"
+            "+-----BEGIN RSA PRIVATE KEY-----\n"  # pragma: allowlist secret
+        )
+        results = run_rules(diff, profile)
+        assert any(r.rule_id == "secrets-in-diff" for r in results)
+
+    def test_check_gate_wrapper(self) -> None:
+        """check_gate() wrapper delegates to engine correctly."""
+        from grippy.rules import check_gate
+        from grippy.rules.config import ProfileConfig
+
+        profile = ProfileConfig(name="security", fail_on=RuleSeverity.ERROR)
+        error_results = [
+            RuleResult(rule_id="x", severity=RuleSeverity.ERROR, message="m", file="f")
+        ]
+        assert check_gate(error_results, profile) is True
+
+        warn_results = [RuleResult(rule_id="x", severity=RuleSeverity.WARN, message="m", file="f")]
+        assert check_gate(warn_results, profile) is False

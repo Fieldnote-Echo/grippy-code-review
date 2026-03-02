@@ -243,3 +243,49 @@ class TestCompositionOrder:
         """The mode-specific prompt is the second instruction."""
         result = load_instructions(full_chain_dir, mode="pr_review")
         assert "# pr-review.md" in result[1]
+
+
+# --- include_rule_findings ---
+
+
+class TestRuleFindingsInclusion:
+    """Tests for include_rule_findings=True in load_instructions."""
+
+    def test_rule_findings_adds_extra_file(self, full_chain_dir: Path) -> None:
+        """include_rule_findings=True inserts rule-findings-context.md before suffix."""
+        # Create the rule-findings-context.md file in the fixture dir
+        (full_chain_dir / "rule-findings-context.md").write_text(
+            "# Rule Findings Context\nExplain rule findings.\n", encoding="utf-8"
+        )
+
+        without = load_instructions(full_chain_dir, mode="security_audit")
+        with_rules = load_instructions(
+            full_chain_dir, mode="security_audit", include_rule_findings=True
+        )
+
+        assert len(with_rules) == len(without) + 1
+
+    def test_rule_findings_before_scoring_rubric(self, full_chain_dir: Path) -> None:
+        """rule-findings-context.md appears before scoring-rubric.md in chain."""
+        (full_chain_dir / "rule-findings-context.md").write_text(
+            "# Rule Findings Context\nExplain rule findings.\n", encoding="utf-8"
+        )
+
+        result = load_instructions(
+            full_chain_dir, mode="security_audit", include_rule_findings=True
+        )
+
+        # scoring-rubric is second-to-last, output-schema is last
+        assert "# output-schema.md" in result[-1]
+        assert "# scoring-rubric.md" in result[-2]
+        assert "# Rule Findings Context" in result[-3]
+
+    def test_rule_findings_not_included_by_default(self, full_chain_dir: Path) -> None:
+        """include_rule_findings=False (default) does not add extra file."""
+        (full_chain_dir / "rule-findings-context.md").write_text(
+            "# Rule Findings Context\n", encoding="utf-8"
+        )
+
+        result = load_instructions(full_chain_dir, mode="security_audit")
+        joined = "\n".join(result)
+        assert "Rule Findings Context" not in joined
