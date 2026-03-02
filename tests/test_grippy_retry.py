@@ -166,12 +166,14 @@ class TestRunReviewExhausted:
         with pytest.raises(ReviewParseError):
             run_review(agent, "Review this PR", max_retries=3)
 
-    def test_error_contains_last_raw_output(self) -> None:
-        """ReviewParseError includes the last raw output for debugging."""
+    def test_error_redacts_raw_output(self) -> None:
+        """ReviewParseError redacts raw output from str() but keeps it on .last_raw."""
         agent = _mock_agent("garbage1", "garbage2", "garbage3", "garbage4")
         with pytest.raises(ReviewParseError) as exc_info:
             run_review(agent, "Review this PR", max_retries=3)
-        assert "garbage" in str(exc_info.value)
+        assert "garbage" not in str(exc_info.value)
+        assert "redacted" in str(exc_info.value)
+        assert "garbage" in exc_info.value.last_raw
 
     def test_error_contains_attempt_count(self) -> None:
         """ReviewParseError includes how many attempts were made."""

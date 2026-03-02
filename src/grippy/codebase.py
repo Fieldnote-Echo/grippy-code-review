@@ -13,9 +13,11 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import navi_sanitize
 from agno.tools.function import Function
 from agno.tools.toolkit import Toolkit
 
@@ -71,6 +73,16 @@ class BatchEmbedder(Protocol):
 
 
 # --- Utilities ---
+
+
+def _sanitize_tool_output(text: str) -> str:
+    """Sanitize tool output before it reaches the LLM.
+
+    Runs navi_sanitize to strip invisible/confusable chars, then XML-escapes
+    so that attacker-controlled file content cannot break out of prompt tags.
+    """
+    text = navi_sanitize.clean(text)
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _limit_result(text: str, max_chars: int = _MAX_RESULT_CHARS) -> str:
@@ -335,7 +347,7 @@ def _make_search_code(index: CodebaseIndex) -> Any:
         for r in results:
             header = f"--- {r['file_path']} (lines {r['start_line']}-{r['end_line']}) ---"
             lines.append(header)
-            lines.append(r["text"])
+            lines.append(_sanitize_tool_output(r["text"]))
             lines.append("")
         return _limit_result("\n".join(lines))
 
@@ -385,7 +397,7 @@ def _make_grep_code(repo_root: Path) -> Any:
                 return "No matches found."
             if result.returncode != 0:
                 return f"Search failed: {result.stderr.strip()}"
-            return _limit_result(result.stdout)
+            return _limit_result(_sanitize_tool_output(result.stdout))
         except subprocess.TimeoutExpired:
             return "Search timed out — try a more specific pattern."
         except FileNotFoundError:
@@ -416,6 +428,14 @@ def _make_read_file(repo_root: Path) -> Any:
         if not target.is_file():
             return f"File not found: {path}"
 
+        # Reject files over 1 MB to prevent memory exhaustion
+        try:
+            file_size = target.stat().st_size
+        except OSError as e:
+            return f"Error reading file: {e}"
+        if file_size > 1_000_000:
+            return f"Error: file too large ({file_size} bytes, limit 1 MB)."
+
         try:
             lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as e:
@@ -432,7 +452,10 @@ def _make_read_file(repo_root: Path) -> Any:
             end_idx = len(lines)
 
         selected = lines[start_idx:end_idx]
-        numbered = [f"{start_idx + i + 1:4d} | {line}" for i, line in enumerate(selected)]
+        numbered = [
+            f"{start_idx + i + 1:4d} | {_sanitize_tool_output(line)}"
+            for i, line in enumerate(selected)
+        ]
         result = f"# {path} (lines {start_idx + 1}-{start_idx + len(selected)})\n"
         result += "\n".join(numbered)
         return _limit_result(result)
@@ -467,7 +490,10 @@ def _make_list_files(repo_root: Path) -> Any:
             # without expanding/sorting the entire glob iterator.
             collected: list[Path] = []
             truncated = False
+            glob_start = time.monotonic()
             for entry in target.glob(glob_pattern):
+                if time.monotonic() - glob_start > 5.0:
+                    return "Error: glob timeout — use a more specific pattern."
                 if entry.resolve().is_relative_to(resolved_root):
                     collected.append(entry)
                     if len(collected) > _MAX_GLOB_RESULTS:

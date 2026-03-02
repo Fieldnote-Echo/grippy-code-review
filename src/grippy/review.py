@@ -28,6 +28,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import navi_sanitize
+
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
@@ -172,11 +174,13 @@ _SEVERITY_MAP: dict[RuleSeverity, str] = {
 
 
 def _escape_rule_field(text: str) -> str:
-    """Escape XML delimiters in rule finding fields to prevent prompt injection.
+    """Sanitize and escape rule finding fields to prevent prompt injection.
 
-    Crafted filenames or evidence strings could contain XML/prompt-injection
-    payloads (e.g. ``</rule_findings><system>``). Escaping neutralizes them.
+    Pipeline: navi-sanitize (invisible chars, bidi, homoglyphs, NFKC) →
+    XML delimiter escaping. Crafted filenames or evidence strings could
+    contain Unicode obfuscation or XML payloads — both are neutralized.
     """
+    text = navi_sanitize.clean(text)
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
@@ -233,8 +237,9 @@ def main(*, profile: str | None = None) -> None:
     # 1. Parse event
     print("=== Grippy Review ===")
     pr_event = load_pr_event(event_path)
+    safe_title = pr_event["title"].replace("\n", " ").replace("\r", " ")
     print(
-        f"PR #{pr_event['pr_number']}: {pr_event['title']} "
+        f"PR #{pr_event['pr_number']}: {safe_title} "
         f"({pr_event['head_ref']} → {pr_event['base_ref']})"
     )
 
@@ -300,8 +305,8 @@ def main(*, profile: str | None = None) -> None:
         if "403" in str(exc):
             print(
                 "::error::The token may lack access to this fork's diff. "
-                "Ensure the workflow has `pull_request_target` trigger or "
-                "the token has read access to the fork."
+                "Ensure the GITHUB_TOKEN has read access to the fork, "
+                "or use a PAT with `contents: read` scope."
             )
         try:
             post_comment(
@@ -332,6 +337,7 @@ def main(*, profile: str | None = None) -> None:
     rule_findings: list[RuleResult] = []
     rule_gate_failed = False
     expected_rule_counts: dict[str, int] | None = None
+    expected_rule_files: dict[str, frozenset[str]] | None = None
     rule_findings_text = ""
 
     if profile_config.name != "general":
@@ -342,6 +348,10 @@ def main(*, profile: str | None = None) -> None:
         if rule_findings:
             rule_findings_text = _format_rule_findings(rule_findings)
             expected_rule_counts = dict(Counter(r.rule_id for r in rule_findings))
+            expected_rule_files = {
+                rule_id: frozenset(r.file for r in rule_findings if r.rule_id == rule_id)
+                for rule_id in expected_rule_counts
+            }
         mode = "security_audit"
 
     # H2: cap diff size to avoid overflowing LLM context (after rule engine)
@@ -386,10 +396,15 @@ def main(*, profile: str | None = None) -> None:
     )
 
     # 5. Run review with retry + validation (replaces agent.run + parse_review_response)
-    print(f"Running review (model={model_id}, endpoint={base_url})...")
+    print("Running review...")
     try:
         review = _with_timeout(
-            lambda: run_review(agent, user_message, expected_rule_counts=expected_rule_counts),
+            lambda: run_review(
+                agent,
+                user_message,
+                expected_rule_counts=expected_rule_counts,
+                expected_rule_files=expected_rule_files,
+            ),
             timeout_seconds=timeout_seconds,
         )
     except ReviewParseError as exc:

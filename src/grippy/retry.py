@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
@@ -28,7 +27,7 @@ class ReviewParseError(Exception):
         self.errors = errors
         super().__init__(
             f"Failed to parse GrippyReview after {attempts} attempts. "
-            f"Last raw output: {last_raw[:500]!r}. "
+            f"Last raw output: ({len(last_raw)} chars, redacted). "
             f"Errors: {'; '.join(errors[-3:])}"
         )
 
@@ -86,19 +85,24 @@ def _parse_response(content: Any) -> GrippyReview:
 def _validate_rule_coverage(
     review: GrippyReview,
     expected_rule_counts: dict[str, int],
+    expected_rule_files: dict[str, frozenset[str]] | None = None,
 ) -> list[str]:
-    """Return rule_ids with insufficient findings.
+    """Return rule_ids with insufficient or fabricated findings.
 
     Validates that the LLM produced at least as many findings per rule_id
-    as the deterministic engine detected. Prevents silent dropping of
-    multiple findings from the same rule (e.g. several leaked secrets).
+    as the deterministic engine detected, AND that those findings reference
+    files actually flagged by the rule engine. Prevents both silent dropping
+    and dummy/hallucinated findings that pass count checks.
     """
-    found_counts = Counter(f.rule_id for f in review.findings if f.rule_id)
     missing: list[str] = []
     for rule_id, expected in sorted(expected_rule_counts.items()):
-        found = found_counts.get(rule_id, 0)
-        if found < expected:
-            missing.append(f"{rule_id} (expected {expected}, got {found})")
+        matching = [f for f in review.findings if f.rule_id == rule_id]
+        if len(matching) < expected:
+            missing.append(f"{rule_id} (expected {expected}, got {len(matching)})")
+        elif expected_rule_files and rule_id in expected_rule_files:
+            finding_files = {f.file for f in matching}
+            if not finding_files & expected_rule_files[rule_id]:
+                missing.append(f"{rule_id} (findings don't reference flagged files)")
     return missing
 
 
@@ -109,6 +113,7 @@ def run_review(
     max_retries: int = 3,
     on_validation_error: Callable[[int, Exception], None] | None = None,
     expected_rule_counts: dict[str, int] | None = None,
+    expected_rule_files: dict[str, frozenset[str]] | None = None,
 ) -> GrippyReview:
     """Run a review with structured output validation and retry.
 
@@ -137,7 +142,7 @@ def run_review(
             review = _parse_response(content)
             # Post-parse rule coverage validation
             if expected_rule_counts:
-                missing = _validate_rule_coverage(review, expected_rule_counts)
+                missing = _validate_rule_coverage(review, expected_rule_counts, expected_rule_files)
                 if missing:
                     error_str = f"Missing rule findings: {', '.join(missing)}"
                     errors.append(f"Attempt {attempt}: {error_str}")

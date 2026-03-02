@@ -83,13 +83,13 @@ class TestSessionPersistence:
         )
         assert agent.num_history_runs == 3
 
-    def test_history_enabled_with_db(self, tmp_path: Path) -> None:
-        """add_history_to_context is True when db is configured."""
+    def test_history_disabled_with_db(self, tmp_path: Path) -> None:
+        """add_history_to_context is False — unsanitized history is a poisoning vector."""
         agent = create_reviewer(
             prompts_dir=PROMPTS_DIR,
             db_path=tmp_path / "session.db",
         )
-        assert agent.add_history_to_context is True
+        assert agent.add_history_to_context is False
 
     def test_history_disabled_without_db(self) -> None:
         """add_history_to_context stays False when no db."""

@@ -6,7 +6,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # --- Enums ---
 
@@ -100,6 +100,13 @@ class Finding(BaseModel):
     category: FindingCategory
     file: str
     line_start: int
+
+    @field_validator("file")
+    @classmethod
+    def _sanitize_file_path(cls, v: str) -> str:
+        """Strip newlines and backticks from file paths."""
+        return v.replace("\n", "").replace("\r", "").replace("`", "")
+
     line_end: int
     title: str = Field(max_length=280)
     description: str = Field(max_length=2000)
