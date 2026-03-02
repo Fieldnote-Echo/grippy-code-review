@@ -337,6 +337,7 @@ def main(*, profile: str | None = None) -> None:
     rule_findings: list[RuleResult] = []
     rule_gate_failed = False
     expected_rule_counts: dict[str, int] | None = None
+    expected_rule_files: dict[str, frozenset[str]] | None = None
     rule_findings_text = ""
 
     if profile_config.name != "general":
@@ -347,6 +348,12 @@ def main(*, profile: str | None = None) -> None:
         if rule_findings:
             rule_findings_text = _format_rule_findings(rule_findings)
             expected_rule_counts = dict(Counter(r.rule_id for r in rule_findings))
+            expected_rule_files = {
+                rule_id: frozenset(
+                    r.file for r in rule_findings if r.rule_id == rule_id
+                )
+                for rule_id in expected_rule_counts
+            }
         mode = "security_audit"
 
     # H2: cap diff size to avoid overflowing LLM context (after rule engine)
@@ -394,7 +401,12 @@ def main(*, profile: str | None = None) -> None:
     print("Running review...")
     try:
         review = _with_timeout(
-            lambda: run_review(agent, user_message, expected_rule_counts=expected_rule_counts),
+            lambda: run_review(
+                agent,
+                user_message,
+                expected_rule_counts=expected_rule_counts,
+                expected_rule_files=expected_rule_files,
+            ),
             timeout_seconds=timeout_seconds,
         )
     except ReviewParseError as exc:
