@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -1407,6 +1408,46 @@ class TestMainEarlyExits:
         with pytest.raises(SystemExit) as exc_info:
             main()
         assert exc_info.value.code == 1
+
+    def test_dev_vars_skipped_in_ci(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When CI env var is set, .dev.vars is not loaded."""
+        monkeypatch.setenv("CI", "true")
+        monkeypatch.setenv("GITHUB_TOKEN", "")
+        monkeypatch.delenv("GRIPPY_TRANSPORT", raising=False)
+
+        # Write a .dev.vars that would set GRIPPY_TRANSPORT if loaded
+        dev_vars = Path(__file__).resolve().parent.parent / "src" / "grippy"
+        dev_vars = dev_vars.parent.parent / ".dev.vars"
+        dev_vars.write_text("GRIPPY_TRANSPORT=openai\n")
+        try:
+            from grippy.review import main
+
+            with pytest.raises(SystemExit):
+                main()
+            # GRIPPY_TRANSPORT should NOT have been set by .dev.vars
+            assert os.environ.get("GRIPPY_TRANSPORT") is None
+        finally:
+            dev_vars.unlink(missing_ok=True)
+
+    def test_dev_vars_loaded_outside_ci(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When CI env var is absent, .dev.vars IS loaded."""
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "")
+        monkeypatch.delenv("DEV_VARS_TEST_MARKER", raising=False)
+
+        dev_vars = Path(__file__).resolve().parent.parent / ".dev.vars"
+        dev_vars.write_text("DEV_VARS_TEST_MARKER=loaded\n")
+        try:
+            from grippy.review import main
+
+            with pytest.raises(SystemExit):
+                main()
+            assert os.environ.get("DEV_VARS_TEST_MARKER") == "loaded"
+        finally:
+            dev_vars.unlink(missing_ok=True)
+            monkeypatch.delenv("DEV_VARS_TEST_MARKER", raising=False)
 
 
 # --- main() diff fetch error paths ---
