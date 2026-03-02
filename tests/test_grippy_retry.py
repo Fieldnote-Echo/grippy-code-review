@@ -366,3 +366,110 @@ class TestRuleCoverageCounts:
         review = self._review_with_findings(["secrets-in-diff"] * 5)
         missing = _validate_rule_coverage(review, {"secrets-in-diff": 2})
         assert missing == []
+
+
+# --- Rule coverage retry integration ---
+
+
+class TestRuleCoverageRetryLoop:
+    """Integration: run_review retries when rule_ids are missing from output."""
+
+    def _review_dict_with_rule_ids(self, rule_ids: list[str | None]) -> dict:
+        """Build a valid review dict with findings having specified rule_ids."""
+        import copy
+
+        data = copy.deepcopy(VALID_REVIEW_DICT)
+        data["findings"] = [
+            {
+                "id": f"F-{i:03d}",
+                "severity": "HIGH",
+                "confidence": 90,
+                "category": "security",
+                "file": "src/app.py",
+                "line_start": 10 + i,
+                "line_end": 15 + i,
+                "title": f"Finding {i}",
+                "description": f"Description {i}",
+                "suggestion": f"Fix {i}",
+                "evidence": "...",
+                "grippy_note": "Grippy says.",
+                "rule_id": rid,
+            }
+            for i, rid in enumerate(rule_ids)
+        ]
+        return data
+
+    def test_retry_on_missing_rule_id(self) -> None:
+        """Agent retries when first response is missing expected rule_id."""
+        # First response: valid review but missing the required rule_id
+        incomplete = self._review_dict_with_rule_ids([None])
+        # Second response: includes the required rule_id
+        complete = self._review_dict_with_rule_ids(["secrets-in-diff"])
+        agent = _mock_agent(incomplete, complete)
+
+        result = run_review(
+            agent,
+            "Review this PR",
+            max_retries=3,
+            expected_rule_counts={"secrets-in-diff": 1},
+        )
+        assert isinstance(result, GrippyReview)
+        assert agent.run.call_count == 2
+
+        # Retry message should mention missing rule
+        retry_msg = agent.run.call_args_list[1][0][0]
+        assert "secrets-in-diff" in retry_msg
+        assert "rule_id" in retry_msg
+
+    def test_no_retry_when_all_rule_ids_present(self) -> None:
+        """No retry needed when first response has all expected rule_ids."""
+        complete = self._review_dict_with_rule_ids(["secrets-in-diff", "ci-risk"])
+        agent = _mock_agent(complete)
+
+        result = run_review(
+            agent,
+            "Review this PR",
+            max_retries=3,
+            expected_rule_counts={"secrets-in-diff": 1, "ci-risk": 1},
+        )
+        assert isinstance(result, GrippyReview)
+        assert agent.run.call_count == 1
+
+    def test_warns_on_exhausted_retries_with_missing_rules(self) -> None:
+        """Returns partial review with warning when rule coverage never met."""
+        import warnings
+
+        # All responses are valid but missing the rule_id
+        incomplete = self._review_dict_with_rule_ids([None])
+        agent = _mock_agent(incomplete, incomplete, incomplete, incomplete)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = run_review(
+                agent,
+                "Review this PR",
+                max_retries=3,
+                expected_rule_counts={"secrets-in-diff": 1},
+            )
+            assert isinstance(result, GrippyReview)
+            # Should have issued a warning about incomplete coverage
+            rule_warnings = [x for x in w if "Rule coverage incomplete" in str(x.message)]
+            assert len(rule_warnings) == 1
+            assert "secrets-in-diff" in str(rule_warnings[0].message)
+
+    def test_retry_respects_count_not_just_presence(self) -> None:
+        """Retry triggers when rule_id count is less than expected."""
+        # First response: only 1 of 2 expected secrets-in-diff findings
+        partial = self._review_dict_with_rule_ids(["secrets-in-diff"])
+        # Second response: both findings present
+        complete = self._review_dict_with_rule_ids(["secrets-in-diff", "secrets-in-diff"])
+        agent = _mock_agent(partial, complete)
+
+        result = run_review(
+            agent,
+            "Review this PR",
+            max_retries=3,
+            expected_rule_counts={"secrets-in-diff": 2},
+        )
+        assert isinstance(result, GrippyReview)
+        assert agent.run.call_count == 2

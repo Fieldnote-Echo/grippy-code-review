@@ -382,3 +382,51 @@ class TestNodeIdValidation:
         nodes_v2 = [{"id": poisoned_id, "type": "FILE", "label": "new.py", "data": "{}"}]
         with pytest.raises(ValueError, match="Invalid node_id"):
             store._upsert_vectors(nodes_v2, [fake_vec])
+
+    def test_upsert_vectors_replaces_stale_records(self, store: GrippyStore) -> None:
+        """Valid stale node_id triggers delete + re-insert with updated text.
+
+        This covers the happy path at persistence.py:301-307 — when a node's
+        label changes between calls, the old LanceDB record is deleted and
+        a new one with the updated embedding is inserted.
+        """
+        valid_id = "FILE:abcdef012345"
+        fake_vec = [0.1] * EMBED_DIM
+
+        # First call — creates the table with initial label
+        nodes_v1 = [{"id": valid_id, "type": "FILE", "label": "old_label.py", "data": "{}"}]
+        store._upsert_vectors(nodes_v1, [fake_vec])
+
+        # Verify initial state
+        table = store._ensure_nodes_table()
+        arrow = table.to_arrow()
+        texts_v1 = arrow.column("text").to_pylist()
+        assert len(texts_v1) == 1
+        assert "old_label" in texts_v1[0]
+
+        # Second call — same id, different label → stale delete + re-insert
+        new_vec = [0.9] * EMBED_DIM
+        nodes_v2 = [{"id": valid_id, "type": "FILE", "label": "new_label.py", "data": "{}"}]
+        store._upsert_vectors(nodes_v2, [new_vec])
+
+        # Verify: exactly 1 record, with updated text
+        arrow = table.to_arrow()
+        node_ids = arrow.column("node_id").to_pylist()
+        texts_v2 = arrow.column("text").to_pylist()
+        assert len(node_ids) == 1
+        assert node_ids[0] == valid_id
+        assert "new_label" in texts_v2[0]
+        assert "old_label" not in texts_v2[0]
+
+    def test_upsert_vectors_skips_unchanged_records(self, store: GrippyStore) -> None:
+        """Records with same node_id and same text are not re-inserted."""
+        valid_id = "FILE:abcdef012345"
+        fake_vec = [0.5] * EMBED_DIM
+
+        nodes = [{"id": valid_id, "type": "FILE", "label": "same.py", "data": "{}"}]
+        store._upsert_vectors(nodes, [fake_vec])
+        store._upsert_vectors(nodes, [fake_vec])
+
+        table = store._ensure_nodes_table()
+        arrow = table.to_arrow()
+        assert len(arrow.column("node_id").to_pylist()) == 1
