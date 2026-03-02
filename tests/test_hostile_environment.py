@@ -401,7 +401,7 @@ class TestOutputSanitizationGaps:
             new_count=1,
             resolved_count=0,
             off_diff_findings=[finding],
-            head_sha="abc1234def",
+            head_sha="abc1234def",  # pragma: allowlist secret
             pr_number=1,
         )
         # Desired: bidi chars in file path should be stripped
@@ -609,7 +609,7 @@ class TestSchemaValidationAttacks:
             new_count=1,
             resolved_count=0,
             off_diff_findings=[finding],
-            head_sha="abc1234def",
+            head_sha="abc1234def",  # pragma: allowlist secret
             pr_number=1,
         )
         # Desired: newlines in file path should not reach comment
@@ -624,7 +624,7 @@ class TestSchemaValidationAttacks:
             new_count=1,
             resolved_count=0,
             off_diff_findings=[finding],
-            head_sha="abc1234def",
+            head_sha="abc1234def",  # pragma: allowlist secret
             pr_number=1,
         )
         # Desired: backticks should be escaped before markdown embedding
