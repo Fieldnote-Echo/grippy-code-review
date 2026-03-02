@@ -130,7 +130,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra persistence
 
       - name: Audit dependencies
         run: uv run pip-audit --desc --output=pip-audit-report.json --format=json --skip-editable
@@ -249,7 +249,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install semgrep
-        run: pipx install semgrep
+        run: pipx install semgrep==1.153.1
 
       - name: Run semgrep
         run: |

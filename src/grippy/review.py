@@ -203,14 +203,15 @@ def _format_rule_findings(results: list[RuleResult]) -> str:
 
 def main(*, profile: str | None = None) -> None:
     """CI entry point — reads env, runs review, posts comment."""
-    # Load .dev.vars if present (local dev)
-    dev_vars_path = Path(__file__).resolve().parent.parent.parent / ".dev.vars"
-    if dev_vars_path.is_file():
-        for line in dev_vars_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key, _, value = line.partition("=")
-                os.environ.setdefault(key.strip(), value.strip())
+    # Load .dev.vars if present (local dev only — never in CI)
+    if not os.environ.get("CI"):
+        dev_vars_path = Path(__file__).resolve().parent.parent.parent / ".dev.vars"
+        if dev_vars_path.is_file():
+            for line in dev_vars_path.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip())
 
     # Required env
     token = os.environ.get("GITHUB_TOKEN", "")
