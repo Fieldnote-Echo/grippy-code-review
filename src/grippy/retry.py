@@ -142,9 +142,7 @@ def run_review(
             review = _parse_response(content)
             # Post-parse rule coverage validation
             if expected_rule_counts:
-                missing = _validate_rule_coverage(
-                    review, expected_rule_counts, expected_rule_files
-                )
+                missing = _validate_rule_coverage(review, expected_rule_counts, expected_rule_files)
                 if missing:
                     error_str = f"Missing rule findings: {', '.join(missing)}"
                     errors.append(f"Attempt {attempt}: {error_str}")

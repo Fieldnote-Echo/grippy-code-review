@@ -27,9 +27,10 @@ DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompts_data"
 _INJECTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)ignore\s+(?:all\s+)?previous\s+instructions?"), "[BLOCKED]"),
     (re.compile(r"(?i)score\s+this\s+(?:PR|review|code)\s+\d+"), "[BLOCKED]"),
-    (re.compile(
-        r"(?i)(?:confidence|severity)\s+(?:below|under|above|less\s+than)\s+\d+"
-    ), "[BLOCKED]"),
+    (
+        re.compile(r"(?i)(?:confidence|severity)\s+(?:below|under|above|less\s+than)\s+\d+"),
+        "[BLOCKED]",
+    ),
     (re.compile(r"(?i)IMPORTANT\s+SYSTEM\s+UPDATE"), "[BLOCKED]"),
     (re.compile(r"(?i)you\s+are\s+now\s+"), "[BLOCKED] "),
     (re.compile(r"(?i)skip\s+(?:security\s+)?analysis"), "[BLOCKED]"),

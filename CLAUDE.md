@@ -123,9 +123,22 @@ Review modes: `pr_review`, `security_audit`, `governance_check`, `surprise_audit
 The codebase tools in `codebase.py` are security-sensitive since they accept LLM-generated input:
 - Path traversal protection uses `Path.is_relative_to()` (not `startswith`)
 - `grep_code` does not follow symlinks (`-S` flag)
-- `list_files` enforces repo boundary checks
+- `list_files` enforces repo boundary checks with 5-second glob timeout (`time.monotonic()`)
 - Result limits: 5,000 files indexed, 500 glob results, 12,000 char per tool response
+- Tool outputs are sanitized with `navi_sanitize.clean()` and XML-escaped before reaching the LLM — prevents indirect prompt injection through crafted file contents
 
-The retry and rule engine paths have prompt-injection mitigations:
-- `_safe_error_summary()` in `retry.py` strips raw field values from `ValidationError` before echoing into retry prompts — prevents attacker-controlled PR content from riding validation errors into the LLM context.
-- `_escape_rule_field()` in `review.py` XML-escapes filenames, messages, and evidence before inserting rule findings into the LLM user message — prevents crafted filenames from escaping their `<rule_findings>` tagged context.
+The prompt construction pipeline (`agent.py`) has multi-layer injection defense:
+- `_escape_xml()` applies navi-sanitize (Unicode normalization), NL injection pattern neutralization (7 compiled regexes replacing scoring directives, confidence manipulation, system overrides with `[BLOCKED]`), and XML entity escaping — in that order
+- `format_pr_context()` prepends a data-fence boundary instructing the LLM to treat all subsequent content as data, not instructions
+- `_escape_rule_field()` in `review.py` XML-escapes filenames, messages, and evidence before inserting rule findings into the `<rule_findings>` context
+
+The output pipeline (`github_review.py`) runs 5 stages on all LLM text before posting:
+- navi-sanitize → nh3 HTML stripping → markdown image removal (tracking pixels) → markdown link rewriting (phishing) → dangerous URI scheme filter
+
+Session history (`add_history_to_context`) is disabled — prior LLM responses may contain attacker-controlled PR content echoed by the model, enabling history poisoning.
+
+The retry path (`retry.py`) has two mitigations:
+- `_safe_error_summary()` strips raw field values from `ValidationError` before echoing into retry prompts
+- `_validate_rule_coverage()` cross-references rule findings against both expected counts AND expected file sets — prevents dummy/hallucinated findings that pass count checks alone
+
+The adversarial test suite (`tests/test_hostile_environment.py`) exercises 44 attack scenarios across 9 domains. All pass.

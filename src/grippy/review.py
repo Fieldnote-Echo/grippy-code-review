@@ -349,9 +349,7 @@ def main(*, profile: str | None = None) -> None:
             rule_findings_text = _format_rule_findings(rule_findings)
             expected_rule_counts = dict(Counter(r.rule_id for r in rule_findings))
             expected_rule_files = {
-                rule_id: frozenset(
-                    r.file for r in rule_findings if r.rule_id == rule_id
-                )
+                rule_id: frozenset(r.file for r in rule_findings if r.rule_id == rule_id)
                 for rule_id in expected_rule_counts
             }
         mode = "security_audit"
