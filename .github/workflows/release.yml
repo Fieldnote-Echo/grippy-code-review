@@ -34,6 +34,24 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@17ae1740179002c89186b61233e0f892c3118b11  # v0.23.0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: dist/sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@17ae1740179002c89186b61233e0f892c3118b11  # v0.23.0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7
         with:
@@ -90,3 +108,5 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.whl
+            dist/sbom.cdx.json
+            dist/sbom.spdx.json
