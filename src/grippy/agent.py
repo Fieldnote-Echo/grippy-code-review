@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -148,7 +149,8 @@ def create_reviewer(
 
     # Resolve transport via three-tier priority
     resolved_transport, source = _resolve_transport(transport, model_id)
-    print(f"::notice::Grippy transport={resolved_transport} model={model_id} (source: {source})")
+    log = logging.getLogger(__name__)
+    log.info("Grippy transport=%s (source: %s)", resolved_transport, source)
 
     if resolved_transport == "openai":
         model = OpenAIChat(id=model_id)

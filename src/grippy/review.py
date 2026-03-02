@@ -237,8 +237,9 @@ def main(*, profile: str | None = None) -> None:
     # 1. Parse event
     print("=== Grippy Review ===")
     pr_event = load_pr_event(event_path)
+    safe_title = pr_event["title"].replace("\n", " ").replace("\r", " ")
     print(
-        f"PR #{pr_event['pr_number']}: {pr_event['title']} "
+        f"PR #{pr_event['pr_number']}: {safe_title} "
         f"({pr_event['head_ref']} → {pr_event['base_ref']})"
     )
 
@@ -304,8 +305,8 @@ def main(*, profile: str | None = None) -> None:
         if "403" in str(exc):
             print(
                 "::error::The token may lack access to this fork's diff. "
-                "Ensure the workflow has `pull_request_target` trigger or "
-                "the token has read access to the fork."
+                "Ensure the GITHUB_TOKEN has read access to the fork, "
+                "or use a PAT with `contents: read` scope."
             )
         try:
             post_comment(
@@ -390,7 +391,7 @@ def main(*, profile: str | None = None) -> None:
     )
 
     # 5. Run review with retry + validation (replaces agent.run + parse_review_response)
-    print(f"Running review (model={model_id}, endpoint={base_url})...")
+    print("Running review...")
     try:
         review = _with_timeout(
             lambda: run_review(agent, user_message, expected_rule_counts=expected_rule_counts),

@@ -28,7 +28,7 @@ class ReviewParseError(Exception):
         self.errors = errors
         super().__init__(
             f"Failed to parse GrippyReview after {attempts} attempts. "
-            f"Last raw output: {last_raw[:500]!r}. "
+            f"Last raw output: ({len(last_raw)} chars, redacted). "
             f"Errors: {'; '.join(errors[-3:])}"
         )
 

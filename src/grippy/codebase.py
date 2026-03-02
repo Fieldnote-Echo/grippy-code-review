@@ -416,6 +416,14 @@ def _make_read_file(repo_root: Path) -> Any:
         if not target.is_file():
             return f"File not found: {path}"
 
+        # Reject files over 1 MB to prevent memory exhaustion
+        try:
+            file_size = target.stat().st_size
+        except OSError as e:
+            return f"Error reading file: {e}"
+        if file_size > 1_000_000:
+            return f"Error: file too large ({file_size} bytes, limit 1 MB)."
+
         try:
             lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError as e:

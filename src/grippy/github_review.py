@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import subprocess
 from typing import Any
+from urllib.parse import unquote
 
 import navi_sanitize
 import nh3
@@ -145,7 +146,7 @@ def _sanitize_comment_text(text: str) -> str:
     """
     text = navi_sanitize.clean(text)
     text = nh3.clean(text, tags=set())
-    text = _DANGEROUS_SCHEME_RE.sub("", text)
+    text = _DANGEROUS_SCHEME_RE.sub("", unquote(text))
     return text
 
 
@@ -312,7 +313,7 @@ def format_summary_comment(
             f_description = _sanitize_comment_text(f.description)
             f_suggestion = _sanitize_comment_text(f.suggestion)
             lines.append(f"#### {sev_emoji} {f.severity.value}: {f_title}")
-            lines.append(f"\U0001f4c1 `{f.file}:{f.line_start}`")
+            lines.append(f"\U0001f4c1 `{_sanitize_path(f.file)}:{f.line_start}`")
             lines.append("")
             lines.append(f_description)
             lines.append("")
