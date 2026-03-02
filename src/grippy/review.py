@@ -28,6 +28,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import navi_sanitize
+
 from grippy.agent import create_reviewer, format_pr_context
 from grippy.embedder import create_embedder
 from grippy.github_review import post_review
@@ -172,11 +174,13 @@ _SEVERITY_MAP: dict[RuleSeverity, str] = {
 
 
 def _escape_rule_field(text: str) -> str:
-    """Escape XML delimiters in rule finding fields to prevent prompt injection.
+    """Sanitize and escape rule finding fields to prevent prompt injection.
 
-    Crafted filenames or evidence strings could contain XML/prompt-injection
-    payloads (e.g. ``</rule_findings><system>``). Escaping neutralizes them.
+    Pipeline: navi-sanitize (invisible chars, bidi, homoglyphs, NFKC) →
+    XML delimiter escaping. Crafted filenames or evidence strings could
+    contain Unicode obfuscation or XML payloads — both are neutralized.
     """
+    text = navi_sanitize.clean(text)
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 

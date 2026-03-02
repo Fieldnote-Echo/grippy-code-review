@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import navi_sanitize
 from agno.agent import Agent
 from agno.models.openai import OpenAIChat
 from agno.models.openai.like import OpenAILike
@@ -18,7 +19,12 @@ DEFAULT_PROMPTS_DIR = Path(__file__).parent / "prompts_data"
 
 
 def _escape_xml(text: str) -> str:
-    """Escape XML delimiters to prevent prompt injection via PR metadata."""
+    """Sanitize and escape text for safe embedding in XML-tagged prompts.
+
+    Pipeline: navi-sanitize (invisible chars, bidi, homoglyphs, NFKC) →
+    XML delimiter escaping (& < >).
+    """
+    text = navi_sanitize.clean(text)
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
