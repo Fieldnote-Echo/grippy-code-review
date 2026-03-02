@@ -39,7 +39,7 @@ jobs:
         with:
           path: .
           format: cyclonedx-json
-          output-file: dist/sbom.cdx.json
+          output-file: sbom/sbom.cdx.json
           upload-artifact: false
           upload-release-assets: false
 
@@ -48,7 +48,7 @@ jobs:
         with:
           path: .
           format: spdx-json
-          output-file: dist/sbom.spdx.json
+          output-file: sbom/sbom.spdx.json
           upload-artifact: false
           upload-release-assets: false
 
@@ -57,6 +57,13 @@ jobs:
         with:
           name: dist
           path: dist/
+          retention-days: 5
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7
+        with:
+          name: sbom
+          path: sbom/
           retention-days: 5
 
   publish:
@@ -101,6 +108,12 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Download SBOM artifacts
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3  # v8
+        with:
+          name: sbom
+          path: sbom/
+
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b  # v2.5.0
         with:
@@ -108,5 +121,5 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.whl
-            dist/sbom.cdx.json
-            dist/sbom.spdx.json
+            sbom/sbom.cdx.json
+            sbom/sbom.spdx.json

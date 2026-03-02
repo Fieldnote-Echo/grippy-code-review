@@ -195,6 +195,7 @@ jobs:
           else COLOR="red"; fi
           mkdir -p .github/badges
           curl -s "https://img.shields.io/badge/coverage-${COV}%25-${COLOR}" > .github/badges/coverage.svg
+          echo "" >> .github/badges/coverage.svg
 
       - name: Commit gate + badge
         run: |
