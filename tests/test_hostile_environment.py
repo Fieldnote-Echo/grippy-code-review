@@ -364,14 +364,12 @@ class TestOutputSanitizationGaps:
         result = _sanitize_comment_text("[run](vbscript:MsgBox('pwned'))")
         assert "vbscript:" not in result
 
-    @pytest.mark.xfail(reason="Markdown image trackers not stripped — only HTML/scheme sanitized")
-    def test_markdown_image_tracker_survives(self) -> None:
+    def test_markdown_image_tracker_stripped(self) -> None:
         result = _sanitize_comment_text("![](https://evil.com/tracker.png?pr=123)")
         # Desired: external image references should be stripped
         assert "evil.com" not in result
 
-    @pytest.mark.xfail(reason="Markdown link trackers not stripped — only HTML/scheme sanitized")
-    def test_markdown_link_tracker_survives(self) -> None:
+    def test_markdown_link_tracker_stripped(self) -> None:
         result = _sanitize_comment_text("[click for details](https://evil.com/phish)")
         # Desired: external links should be stripped or rewritten
         assert "evil.com" not in result
@@ -433,8 +431,7 @@ class TestCodebaseToolExploitation:
         result = read_file("legit\x00.py")
         assert "error" in result.lower() or "not found" in result.lower()
 
-    @pytest.mark.xfail(reason="No timeout on Path.glob() — deeply nested patterns could hang")
-    def test_deeply_nested_glob_no_timeout(self, tmp_path: Path) -> None:
+    def test_glob_has_timeout_protection(self, tmp_path: Path) -> None:
         """list_files has no timeout protection for Path.glob()."""
         source = inspect.getsource(_make_list_files)
         # Desired: glob operations should have timeout protection

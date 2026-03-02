@@ -146,6 +146,9 @@ def _sanitize_comment_text(text: str) -> str:
     """
     text = navi_sanitize.clean(text)
     text = nh3.clean(text, tags=set())
+    # Strip markdown images (tracking pixels) and external links (phishing)
+    text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
+    text = re.sub(r"\[([^\]]*)\]\(https?://[^)]+\)", r"\1", text)
     text = _DANGEROUS_SCHEME_RE.sub("", unquote(text))
     return text
 

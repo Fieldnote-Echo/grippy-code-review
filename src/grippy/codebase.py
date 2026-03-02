@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -489,7 +490,10 @@ def _make_list_files(repo_root: Path) -> Any:
             # without expanding/sorting the entire glob iterator.
             collected: list[Path] = []
             truncated = False
+            glob_start = time.monotonic()
             for entry in target.glob(glob_pattern):
+                if time.monotonic() - glob_start > 5.0:
+                    return "Error: glob timeout — use a more specific pattern."
                 if entry.resolve().is_relative_to(resolved_root):
                     collected.append(entry)
                     if len(collected) > _MAX_GLOB_RESULTS:
