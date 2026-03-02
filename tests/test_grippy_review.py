@@ -1365,3 +1365,406 @@ class TestFormatRuleFindings:
         assert "<" not in text
         assert ">" not in text
         assert "&lt;" in text
+
+
+# --- main() early validation exits ---
+
+
+class TestMainEarlyExits:
+    """Verify main() exits early for missing env vars and bad event paths."""
+
+    def test_missing_github_token_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty GITHUB_TOKEN causes sys.exit(1)."""
+        monkeypatch.setenv("GITHUB_TOKEN", "")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", "/tmp/event.json")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_missing_event_path_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty GITHUB_EVENT_PATH causes sys.exit(1)."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", "")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+    def test_nonexistent_event_file_exits(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """GITHUB_EVENT_PATH pointing to nonexistent file causes sys.exit(1)."""
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(tmp_path / "nope.json"))
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+        assert exc_info.value.code == 1
+
+
+# --- main() diff fetch error paths ---
+
+
+class TestMainDiffFetchErrors:
+    """Verify main() handles fetch_pr_diff failures."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 7,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_diff_fetch_failure_posts_error_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """fetch_pr_diff failure posts DIFF ERROR comment and exits 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.side_effect = RuntimeError("Network error")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        mock_post.assert_called_once()
+        assert "DIFF ERROR" in mock_post.call_args[0][3]
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_diff_fetch_403_mentions_fork(
+        self,
+        mock_fetch: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """403 error from diff fetch prints fork-specific warning."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.side_effect = RuntimeError("403 Forbidden")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit):
+            main()
+
+        captured = capsys.readouterr()
+        assert "403" in captured.out
+        assert "fork" in captured.out.lower() or "token" in captured.out.lower()
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_diff_fetch_error_with_post_comment_failure(
+        self,
+        mock_fetch: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Diff fetch error + post_comment failure still exits 1 (inner exception swallowed)."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.side_effect = RuntimeError("Network error")
+        mock_post.side_effect = RuntimeError("GitHub down too")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+
+# --- main() profile error path ---
+
+
+class TestMainProfileError:
+    """Verify main() handles invalid profile gracefully."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 7,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.load_profile")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_invalid_profile_posts_config_error(
+        self,
+        mock_fetch: MagicMock,
+        mock_profile: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid profile raises ValueError -> CONFIG ERROR comment + exit 1."""
+        event_path = self._make_event_file(tmp_path)
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_profile.side_effect = ValueError("Unknown profile: 'bad'")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        mock_post.assert_called_once()
+        assert "CONFIG ERROR" in mock_post.call_args[0][3]
+
+
+# --- main() timeout error path ---
+
+
+class TestMainTimeoutError:
+    """Verify main() handles review timeout."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 7,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review._with_timeout")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_timeout_posts_timeout_comment(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_timeout: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TimeoutError posts TIMEOUT comment and exits 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_timeout.side_effect = TimeoutError("Review timed out after 300s")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+        mock_post.assert_called_once()
+        assert "TIMEOUT" in mock_post.call_args[0][3]
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review._with_timeout")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_timeout_with_post_failure_still_exits(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_timeout: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """TimeoutError + post_comment failure → inner swallowed, exit 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_timeout.side_effect = TimeoutError("timed out")
+        mock_post.side_effect = RuntimeError("GitHub down")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+
+# --- main() nested error handlers ---
+
+
+class TestMainNestedErrorHandlers:
+    """Verify inner post_comment failures are swallowed in error paths."""
+
+    def _make_event_file(self, tmp_path: Path) -> Path:
+        event = {
+            "pull_request": {
+                "number": 7,
+                "title": "test",
+                "user": {"login": "dev"},
+                "head": {"ref": "feat"},
+                "base": {"ref": "main"},
+                "body": "",
+            },
+            "repository": {"full_name": "org/repo"},
+        }
+        event_path = tmp_path / "event.json"
+        event_path.write_text(json.dumps(event))
+        return event_path
+
+    def _setup_env(self, monkeypatch: pytest.MonkeyPatch, event_path: Path, tmp_path: Path) -> None:
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+        monkeypatch.setenv("GRIPPY_DATA_DIR", str(tmp_path / "data"))
+        monkeypatch.setenv("GRIPPY_TIMEOUT", "0")
+        monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_parse_error_with_double_failure(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """ReviewParseError + post_comment failure → inner swallowed, exit 1."""
+        from grippy.retry import ReviewParseError
+
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.side_effect = ReviewParseError(
+            attempts=3, last_raw="garbage", errors=["bad"]
+        )
+        mock_post.side_effect = RuntimeError("GitHub down")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_agent_error_with_double_failure(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """RuntimeError + post_comment failure → inner swallowed, exit 1."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.side_effect = RuntimeError("LLM exploded")
+        mock_post.side_effect = RuntimeError("GitHub also down")
+
+        from grippy.review import main
+
+        with pytest.raises(SystemExit) as exc_info:
+            main()
+
+        assert exc_info.value.code == 1
+
+    @patch("grippy.review.post_comment")
+    @patch("grippy.review.post_review")
+    @patch("grippy.review.run_review")
+    @patch("grippy.review.create_reviewer")
+    @patch("grippy.review.fetch_pr_diff")
+    def test_post_review_and_post_comment_both_fail(
+        self,
+        mock_fetch: MagicMock,
+        mock_create: MagicMock,
+        mock_run_review: MagicMock,
+        mock_post_review: MagicMock,
+        mock_post_comment: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """post_review fails + post_comment fails → no crash on non-blocking verdict."""
+        event_path = self._make_event_file(tmp_path)
+        self._setup_env(monkeypatch, event_path, tmp_path)
+
+        mock_fetch.return_value = "diff --git a/f.py b/f.py\n-old\n+new"
+        mock_run_review.return_value = _make_review()
+        mock_post_review.side_effect = RuntimeError("API down")
+        mock_post_comment.side_effect = RuntimeError("Also down")
+
+        from grippy.review import main
+
+        main()  # Should not raise — non-blocking verdict
