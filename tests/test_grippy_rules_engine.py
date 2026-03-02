@@ -156,7 +156,7 @@ class TestConvenienceWrappers:
             "--- a/config.py\n+++ b/config.py\n"
             "@@ -1,1 +1,2 @@\n"
             " # config\n"
-            "+-----BEGIN RSA PRIVATE KEY-----\n"
+            "+-----BEGIN RSA PRIVATE KEY-----\n"  # pragma: allowlist secret
         )
         results = run_rules(diff, profile)
         assert any(r.rule_id == "secrets-in-diff" for r in results)

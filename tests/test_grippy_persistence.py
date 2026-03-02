@@ -409,7 +409,8 @@ class TestNodeIdValidation:
         nodes_v2 = [{"id": valid_id, "type": "FILE", "label": "new_label.py", "data": "{}"}]
         store._upsert_vectors(nodes_v2, [new_vec])
 
-        # Verify: exactly 1 record, with updated text
+        # Re-fetch table handle after mutation to avoid testing handle caching
+        table = store._ensure_nodes_table()
         arrow = table.to_arrow()
         node_ids = arrow.column("node_id").to_pylist()
         texts_v2 = arrow.column("text").to_pylist()
@@ -516,7 +517,8 @@ class TestUpsertVectorsEdgeCases:
     def test_empty_nodes_returns_early(self, store: GrippyStore) -> None:
         """Calling _upsert_vectors with empty lists does nothing."""
         store._upsert_vectors([], [])
-        # No table should have been created
+        # _ensure_nodes_table only opens an existing table (never creates) —
+        # None confirms no table was created by the empty upsert above.
         assert store._ensure_nodes_table() is None
 
 

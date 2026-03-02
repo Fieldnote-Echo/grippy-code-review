@@ -1192,7 +1192,7 @@ class TestMainRuleEngine:
                 line=5,
             )
         ]
-        mock_gate.return_value = True  # Gate FAILED
+        mock_gate.return_value = True  # True = threshold exceeded = gate failed
         mock_fetch.return_value = "diff --git a/app.py b/app.py\n-old\n+new"
         mock_run_review.return_value = _make_review()
 
@@ -1320,7 +1320,7 @@ class TestFormatRuleFindings:
                 message="AWS key in diff",
                 file="config.py",
                 line=42,
-                evidence="AKIA1234567890ABCDEF",
+                evidence="AKIA1234567890ABCDEF",  # pragma: allowlist secret
             )
         ]
         text = _format_rule_findings(results)
